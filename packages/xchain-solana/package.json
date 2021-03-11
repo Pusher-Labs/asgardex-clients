@@ -1,0 +1,59 @@
+{
+  "name": "@xchainjs/xchain-solana",
+  "version": "0.0.1",
+  "description": "Solana client for XChainJS",
+  "keywords": [
+    "XChain",
+    "Solana"
+  ],
+  "author": "RSquad",
+  "homepage": "https://github.com/xchainjs/xchainjs-lib",
+  "license": "MIT",
+  "main": "lib/index.js",
+  "module": "lib/index.esm.js",
+  "typings": "lib/index.d.ts",
+  "directories": {
+    "lib": "lib",
+    "test": "__tests__"
+  },
+  "files": [
+    "lib"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git@github.com:xchainjs/xchainjs-lib.git"
+  },
+  "scripts": {
+    "clean": "rimraf lib/**",
+    "build": "yarn clean && rollup -c rollup.config.ts",
+    "test": "jest",
+    "cover": "jest --coverage --coverageDirectory ./coverage",
+    "lint": "eslint \"{src,__tests__, __mocks__}/**/*.ts\" --fix --max-warnings 0",
+    "prepublishOnly": "yarn build"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@solana/web3.js": "^0.92.2"
+  },
+  "devDependencies": {
+    "@types/bs58": "^4.0.1",
+    "@xchainjs/xchain-client": "^0.6.0",
+    "@xchainjs/xchain-crypto": "^0.2.3",
+    "@xchainjs/xchain-util": "^0.2.2",
+    "axios": "^0.21.1",
+    "bn.js": "^4.11.9",
+    "bs58": "^4.0.1",
+    "tweetnacl": "^1.0.3"
+  },
+  "peerDependencies": {
+    "@xchainjs/xchain-client": "^0.6.0",
+    "@xchainjs/xchain-crypto": "^0.2.3",
+    "@xchainjs/xchain-util": "^0.2.2",
+    "axios": "^0.21.1",
+    "bn.js": "^4.11.9",
+    "bs58": "^4.0.1",
+    "tweetnacl": "^1.0.3"
+  }
+}

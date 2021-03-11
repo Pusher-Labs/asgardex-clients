@@ -33,6 +33,8 @@ export const chainToString = (chainId: Chain) => {
       return 'Cosmos'
     case 'POLKA':
       return 'Polkadot'
+    case 'SOL':
+      return 'Solana'
     default:
       return 'unknown chain'
   }

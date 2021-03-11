@@ -1,7 +1,7 @@
 import BigNumber from 'bignumber.js'
 import { fixedBN, formatBN } from './bn'
 import { trimZeros as trimZerosHelper } from './string'
-import { BTCChain, LTCChain, BNBChain, ETHChain, THORChain, BCHChain } from './chain.const'
+import { BTCChain, LTCChain, BNBChain, ETHChain, THORChain, BCHChain, SOLChain } from './chain.const'
 import { isChain } from './chain'
 import { Denomination, AssetAmount, BaseAmount, Amounts, Asset } from './types'
 
@@ -162,6 +162,14 @@ export const AssetLTC: Asset = { chain: LTCChain, symbol: 'LTC', ticker: 'LTC' }
  * @see https://gitlab.com/thorchain/thornode/-/blob/master/common/asset.go#L12-24
  */
 export const AssetETH: Asset = { chain: ETHChain, symbol: 'ETH', ticker: 'ETH' }
+
+/**
+ * Base "chain" asset on solana main net.
+ *
+ * Based on definition in Thorchain `common`
+ * @see https://gitlab.com/thorchain/thornode/-/blob/master/common/asset.go#L12-24
+ */
+export const AssetSOL: Asset = { chain: SOLChain, symbol: 'SOL', ticker: 'SOL' }
 
 export const RUNE_TICKER = 'RUNE'
 

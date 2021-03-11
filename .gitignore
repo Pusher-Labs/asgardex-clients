@@ -12,3 +12,4 @@ packages/xchain-client/yarn-error.log
 
 packages/*/lib
 packages/*/yarn.lock
+packages/*/coverage
