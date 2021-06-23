@@ -1,19 +1,53 @@
+import { assetAmount, AssetBCH, assetToBase, THORChain } from '@xchainjs/xchain-util'
 import { AssetRune } from '../src/types'
 import {
+  getAsset,
   getDenom,
   getDenomWithChain,
-  getAsset,
+  isAssetRune,
   isBroadcastSuccess,
-  getExplorerAddressUrl,
-  getExplorerTxUrl,
+  isSynthAsset,
+  getTxType,
+  getDepositTxDataFromLogs,
   getExplorerUrl,
   getDefaultExplorerUrls,
-  getDepositTxDataFromLogs,
-  getTxType,
+  getExplorerAddressUrl,
+  getExplorerTxUrl,
 } from '../src/util'
-import { assetAmount, assetToBase } from '@xchainjs/xchain-util'
 
 describe('thorchain/util', () => {
+  describe('isRuneAsset', () => {
+    it('should return true for RuneAsset', () => {
+      expect(isAssetRune(AssetRune)).toBeTruthy()
+    })
+    it('should return false for other assets', () => {
+      expect(isAssetRune(AssetBCH)).toBeFalsy()
+      expect(
+        isAssetRune({
+          chain: THORChain,
+          symbol: 'ETH/ETH',
+          ticker: 'ETH/ETH',
+        }),
+      ).toBeFalsy()
+    })
+  })
+
+  describe('isSynthAsset', () => {
+    it('should return true for SynthAsset', () => {
+      expect(
+        isSynthAsset({
+          chain: THORChain,
+          symbol: 'ETH/ETH',
+          ticker: 'ETH/ETH',
+        }),
+      ).toBeTruthy()
+    })
+    it('should return false for other assets', () => {
+      expect(isSynthAsset(AssetBCH)).toBeFalsy()
+      expect(isSynthAsset(AssetRune)).toBeFalsy()
+    })
+  })
+
   describe('Denom <-> Asset', () => {
     describe('getDenom', () => {
       it('get denom for AssetRune', () => {

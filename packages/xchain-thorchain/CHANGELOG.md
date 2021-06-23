@@ -1,3 +1,9 @@
+# v.0.17.1 (2021-06-22)
+
+### Update
+
+- update `getTransactionHistory`, `transfer`, `deposit` to support synth assets.
+
 # v.0.17.0 (2021-06-21)
 
 ### Fix

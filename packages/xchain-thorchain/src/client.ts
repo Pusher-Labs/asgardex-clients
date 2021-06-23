@@ -16,7 +16,7 @@ import {
   TxTo,
 } from '@xchainjs/xchain-client'
 import { CosmosSDKClient, RPCTxResult } from '@xchainjs/xchain-cosmos'
-import { Asset, baseAmount, assetToString, assetFromString } from '@xchainjs/xchain-util'
+import { Asset, baseAmount, assetToString } from '@xchainjs/xchain-util'
 import * as xchainCrypto from '@xchainjs/xchain-crypto'
 
 import { PrivKey, AccAddress } from 'cosmos-client'
@@ -34,6 +34,8 @@ import {
   isBroadcastSuccess,
   getPrefix,
   registerCodecs,
+  // getTxType,
+  isAssetRune,
   MAX_TX_COUNT,
   getDefaultClientUrl,
   getDefaultExplorerUrls,
@@ -426,7 +428,7 @@ class Client implements ThorchainClient, XChainClient {
           to: result.observed_tx.tx.to_address,
           amount: baseAmount(coin.amount, DECIMAL),
         })
-        asset = assetFromString(coin.asset)
+        asset = getAsset(coin.asset)
       })
 
       return {
@@ -490,9 +492,9 @@ class Client implements ThorchainClient, XChainClient {
    */
   deposit = async ({ walletIndex = 0, asset = AssetRune, amount, memo }: DepositParam): Promise<TxHash> => {
     try {
-      const assetBalance = await this.getBalance(this.getAddress(walletIndex), [asset])
+      const assetBalances = await this.getBalance(this.getAddress(walletIndex), [asset])
 
-      if (assetBalance.length === 0 || assetBalance[0].amount.amount().lt(amount.amount().plus(DEFAULT_GAS_VALUE))) {
+      if (assetBalances.length === 0 || assetBalances[0].amount.amount().lt(amount.amount().plus(DEFAULT_GAS_VALUE))) {
         throw new Error('insufficient funds')
       }
 
@@ -500,7 +502,7 @@ class Client implements ThorchainClient, XChainClient {
       const msgNativeTx = msgNativeTxFromJson({
         coins: [
           {
-            asset: getDenomWithChain(asset),
+            asset: isAssetRune(asset) ? getDenomWithChain(asset) : getDenom(asset),
             amount: amount.amount().toString(),
           },
         ],
@@ -509,15 +511,46 @@ class Client implements ThorchainClient, XChainClient {
       })
 
       const unsignedStdTx = await this.buildDepositTx(msgNativeTx)
-      const privateKey = this.getPrivateKey(walletIndex)
-      const accAddress = AccAddress.fromBech32(signer)
-      const fee = unsignedStdTx.fee
-      // max. gas
-      fee.gas = '20000000'
+      const fee = unsignedStdTx.fee.gas ?? 0
 
-      return this.cosmosClient
-        .signAndBroadcast(unsignedStdTx, privateKey, accAddress)
-        .then((result) => result?.txhash ?? '')
+      if (isAssetRune(asset)) {
+        // amount + fee <= assetBalances(runeBalance)
+        if (assetBalances.length === 0 || assetBalances[0].amount.amount().lt(amount.amount().plus(fee))) {
+          throw new Error('insufficient funds')
+        }
+      } else {
+        // amount <= assetBalances && fee <= runeBalance
+        const runeBalance = assetBalances.filter((balance) => isAssetRune(balance.asset))
+        if (
+          assetBalances.length === 0 ||
+          assetBalances[0].amount.amount().lt(amount.amount()) ||
+          runeBalance.length === 0 ||
+          runeBalance[0].amount.amount().lt(fee)
+        ) {
+          throw new Error('insufficient funds')
+        }
+      }
+
+      const transferResult = await this.cosmosClient.signAndBroadcast(
+        unsignedStdTx,
+        this.getPrivateKey(),
+        AccAddress.fromBech32(signer),
+      )
+
+      if (!isBroadcastSuccess(transferResult)) {
+        throw new Error(`failed to broadcast transaction: ${transferResult.txhash}`)
+      }
+
+      return transferResult?.txhash || ''
+      // const privateKey = this.getPrivateKey(walletIndex)
+      // const accAddress = AccAddress.fromBech32(signer)
+      // const fee = unsignedStdTx.fee
+      // // max. gas
+      // fee.gas = '20000000'
+
+      // return this.cosmosClient
+      //   .signAndBroadcast(unsignedStdTx, privateKey, accAddress)
+      //   .then((result) => result?.txhash ?? '')
     } catch (error) {
       return Promise.reject(error)
     }
@@ -533,11 +566,30 @@ class Client implements ThorchainClient, XChainClient {
     try {
       registerCodecs(this.network)
 
-      const assetBalance = await this.getBalance(this.getAddress(walletIndex), [asset])
-      const fee = await this.getFees()
-      if (assetBalance.length === 0 || assetBalance[0].amount.amount().lt(amount.amount().plus(fee.average.amount()))) {
-        throw new Error('insufficient funds')
+      const assetBalances = await this.getBalance(this.getAddress())
+      const assetBalance = assetBalances.filter((balance) => assetToString(balance.asset) === assetToString(asset))
+      const fee = (await this.getFees()).average
+
+      if (isAssetRune(asset)) {
+        if (assetBalance.length === 0 || assetBalance[0].amount.amount().lt(amount.amount().plus(fee.amount()))) {
+          throw new Error('insufficient funds')
+        }
+      } else {
+        const runeBalance = assetBalances.filter((balance) => isAssetRune(balance.asset))
+        if (
+          assetBalance.length === 0 ||
+          assetBalance[0].amount.amount().lt(amount.amount()) ||
+          runeBalance.length === 0 ||
+          runeBalance[0].amount.amount().lt(fee.amount())
+        ) {
+          throw new Error('insufficient funds')
+        }
       }
+      // const assetBalance = await this.getBalance(this.getAddress(walletIndex), [asset])
+      // const fee = await this.getFees()
+      // if (assetBalance.length === 0 || assetBalance[0].amount.amount().lt(amount.amount().plus(fee.average.amount()))) {
+      //   throw new Error('insufficient funds')
+      // }
 
       const transferResult = await this.cosmosClient.transfer({
         privkey: this.getPrivateKey(walletIndex),

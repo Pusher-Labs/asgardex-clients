@@ -1,13 +1,17 @@
 import { Asset, assetToString, baseAmount, assetFromString, THORChain, BaseAmount } from '@xchainjs/xchain-util'
 import { AssetRune, ExplorerUrl, ClientUrl, ExplorerUrls, TxData } from './types'
 import { TxLog } from '@xchainjs/xchain-cosmos'
-import { Fees, Network, Address, TxHash } from '@xchainjs/xchain-client'
+import { Fees, Network, Address, TxHash, TxType, TxFrom, TxTo } from '@xchainjs/xchain-client'
 import { AccAddress, codec, Msg } from 'cosmos-client'
 import { MsgMultiSend, MsgSend } from 'cosmos-client/x/bank'
 
 export const DECIMAL = 8
 export const DEFAULT_GAS_VALUE = '2000000'
 export const MAX_TX_COUNT = 100
+
+export const isAssetRune = (asset: Asset): boolean => assetToString(asset) === assetToString(AssetRune)
+
+export const isSynthAsset = (asset: Asset): boolean => asset.chain === THORChain && !isAssetRune(asset)
 
 /**
  * Get denomination from Asset
@@ -16,8 +20,8 @@ export const MAX_TX_COUNT = 100
  * @returns {string} The denomination of the given asset.
  */
 export const getDenom = (asset: Asset): string => {
-  if (assetToString(asset) === assetToString(AssetRune)) return 'rune'
-  return asset.symbol
+  if (isAssetRune(asset)) return 'rune'
+  return asset.symbol.toLowerCase()
 }
 
 /**
@@ -106,15 +110,17 @@ export const registerCodecs = (network: Network): void => {
  * @param {Address} address - Address to get transaction data for
  * @returns {TxData} Parsed transaction data
  */
+
 export const getDepositTxDataFromLogs = (logs: TxLog[], address: Address): TxData => {
   const events = logs[0]?.events
 
   if (!events) {
     throw Error('No events in logs available')
   }
-
+  console.log(address)
   type TransferData = { sender: string; recipient: string; amount: BaseAmount }
   type TransferDataList = TransferData[]
+
   const transferDataList: TransferDataList = events.reduce((acc: TransferDataList, { type, attributes }) => {
     if (type === 'transfer') {
       return attributes.reduce((acc2, { key, value }, index) => {
@@ -129,20 +135,146 @@ export const getDepositTxDataFromLogs = (logs: TxLog[], address: Address): TxDat
     return acc
   }, [])
 
-  const txData: TxData = transferDataList
-    // filter out txs which are not based on given address
-    .filter(({ sender, recipient }) => sender === address || recipient === address)
-    // transform `TransferData` -> `TxData`
-    .reduce(
-      (acc: TxData, { sender, recipient, amount }) => ({
-        ...acc,
-        from: [...acc.from, { amount, from: sender }],
-        to: [...acc.to, { amount, to: recipient }],
-      }),
-      { from: [], to: [], type: 'transfer' },
-    )
+  console.log(transferDataList)
+  const from: TxFrom[] = []
+  const to: TxTo[] = []
+  const txType: TxType = 'unknown'
 
-  return txData
+  return {
+    from,
+    to,
+    type: txType,
+  }
+  // Need to get correct asset from msg
+  // const asset: Asset | null = null
+  // for (const msg of msgs) {
+  //   if (isMsgSend(msg)) {
+  //     const msgSend = msg as MsgSend
+  //     const amount = msgSend.amount
+  //       .map((coin) => baseAmount(coin.amount, DECIMAL))
+  //       .reduce((acc, cur) => baseAmount(acc.amount().plus(cur.amount()), DECIMAL), baseAmount(0, DECIMAL))
+
+  //     if (!asset) {
+  //       msgSend.amount.forEach((coin) => {
+  //         if (coin.denom) asset = getAsset(coin.denom) ?? asset
+  //       })
+  //     }
+
+  //     let from_index = -1
+
+  //     from.forEach((value, index) => {
+  //       if (value.from === msgSend.from_address.toBech32()) from_index = index
+  //     })
+
+  //     if (from_index === -1) {
+  //       from.push({
+  //         from: msgSend.from_address.toBech32(),
+  //         amount,
+  //       })
+  //     } else {
+  //       from[from_index].amount = baseAmount(from[from_index].amount.amount().plus(amount.amount()), DECIMAL)
+  //     }
+
+  //     let to_index = -1
+
+  //     to.forEach((value, index) => {
+  //       if (value.to === msgSend.to_address.toBech32()) to_index = index
+  //     })
+
+  //     if (to_index === -1) {
+  //       to.push({
+  //         to: msgSend.to_address.toBech32(),
+  //         amount,
+  //       })
+  //     } else {
+  //       to[to_index].amount = baseAmount(to[to_index].amount.amount().plus(amount.amount()), DECIMAL)
+  //     }
+  //   } else if (isMsgMultiSend(msg)) {
+  //     const msgMultiSend = msg as MsgMultiSend
+
+  //     msgMultiSend.inputs.map((input) => {
+  //       const amount = input.coins
+  //         .map((coin) => baseAmount(coin.amount, DECIMAL))
+  //         .reduce((acc, cur) => baseAmount(acc.amount().plus(cur.amount()), DECIMAL), baseAmount(0, DECIMAL))
+
+  //       if (!asset) {
+  //         input.coins.forEach((coin) => {
+  //           if (coin.denom) asset = getAsset(coin.denom) ?? asset
+  //         })
+  //       }
+
+  //       let from_index = -1
+
+  //       from.forEach((value, index) => {
+  //         if (value.from === input.address) from_index = index
+  //       })
+
+  //       if (from_index === -1) {
+  //         from.push({
+  //           from: input.address,
+  //           amount,
+  //         })
+  //       } else {
+  //         from[from_index].amount = baseAmount(from[from_index].amount.amount().plus(amount.amount()), DECIMAL)
+  //       }
+  //     })
+
+  //     msgMultiSend.outputs.map((output) => {
+  //       const amount = output.coins
+  //         .map((coin) => baseAmount(coin.amount, DECIMAL))
+  //         .reduce((acc, cur) => baseAmount(acc.amount().plus(cur.amount()), DECIMAL), baseAmount(0, DECIMAL))
+
+  //       if (!asset) {
+  //         output.coins.forEach((coin) => {
+  //           if (coin.denom) asset = getAsset(coin.denom) ?? asset
+  //         })
+  //       }
+
+  //       let to_index = -1
+
+  //       to.forEach((value, index) => {
+  //         if (value.to === output.address) to_index = index
+  //       })
+
+  //       if (to_index === -1) {
+  //         to.push({
+  //           to: output.address,
+  //           amount,
+  //         })
+  //       } else {
+  //         to[to_index].amount = baseAmount(to[to_index].amount.amount().plus(amount.amount()), DECIMAL)
+  //       }
+  //     })
+  //   }
+  // }
+
+  //   return [
+  //     ...acc,
+  //     {
+  //       asset: asset || AssetRune,
+  //       from,
+  //       to,
+  //       date: new Date(tx.timestamp),
+  //       type: from.length > 0 || to.length > 0 ? 'transfer' : 'unknown',
+  //       hash: tx.txhash || '',
+  //     },
+  //   ]
+  // }, [] as Txs)
+
+  // const txData: TxData = transferDataList
+  //   // filter out txs which are not based on given address
+  //   .filter(({ sender, recipient }) => sender === address || recipient === address)
+  //   // transform `TransferData` -> `TxData`
+  //   .reduce(
+  //     (acc: TxData, { sender, recipient, amount }) => ({
+  //       ...acc,
+  //       from: [...acc.from, { amount, from: sender }],
+  //       to: [...acc.to, { amount, to: recipient }],
+  //     }),
+  //     { from: [], to: [], type: 'transfer' },
+  //   )
+
+  // return txData
 }
 
 /**
