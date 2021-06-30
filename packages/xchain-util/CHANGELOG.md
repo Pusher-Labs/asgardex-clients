@@ -1,3 +1,8 @@
+# v.0.2.9 (2021-06-30)
+
+- update getBalance such that it always returns at least RUNE
+
+
 # v.0.2.7 (2021-03-16)
 
 ### Breaking changes

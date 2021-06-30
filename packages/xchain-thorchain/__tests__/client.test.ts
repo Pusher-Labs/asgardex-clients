@@ -1,7 +1,7 @@
 import nock from 'nock'
 
 import { TxsPage } from '@xchainjs/xchain-client'
-import { assetAmount, assetToBase, baseAmount, BaseAmount } from '@xchainjs/xchain-util'
+import { assetAmount, assetToBase, assetToString, baseAmount, BaseAmount } from '@xchainjs/xchain-util'
 import { RPCResponse, RPCTxSearchResult, TxResponse, CosmosSDKClient } from '@xchainjs/xchain-cosmos'
 import { BroadcastTxCommitResult, Coin, BaseAccount } from 'cosmos-client/api'
 import { AssetRune, ThorchainDepositResponse } from '../src/types'
@@ -167,8 +167,10 @@ describe('Client Test', () => {
       height: 0,
       result: [],
     })
-    const result = await thorClient.getBalance(thorClient.getAddress(0))
-    expect(result).toEqual([])
+    const balances = await thorClient.getBalance(thorClient.getAddress(0))
+    expect(balances.length).toEqual(1)
+    expect(assetToString(balances[0].asset)).toEqual(assetToString(AssetRune))
+    expect(balances[0].amount.amount().isEqualTo(baseAmount(0).amount())).toBeTruthy()
   })
 
   it('has balances', async () => {

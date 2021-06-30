@@ -4,6 +4,8 @@ import { TxType, Tx, Fees } from '@xchainjs/xchain-client'
 import { assetFromString, AssetBNB, assetToBase, assetAmount, baseAmount } from '@xchainjs/xchain-util'
 import { DerivePath } from './types/common'
 
+export const BNB_DECIMAL = 8
+
 /**
  * Get `hash` from transfer event sent by Binance chain.
  * @see https://docs.binance.org/api-reference/dex-api/ws-streams.html#3-transfer

@@ -1,3 +1,8 @@
+# v.5.2.2 (2021-06-30)
+
+- update getBalance such that it always returns at least BNB
+
+
 # v.5.2.1 (2021-06-01)
 
 - update peerDependencies

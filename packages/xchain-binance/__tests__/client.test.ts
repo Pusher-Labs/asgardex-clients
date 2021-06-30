@@ -1,7 +1,7 @@
 import nock from 'nock'
 
 import { Client as BinanceClient } from '../src/client'
-import { Asset, AssetBNB, baseAmount, BNBChain } from '@xchainjs/xchain-util'
+import { Asset, AssetBNB, assetToString, baseAmount, BNBChain } from '@xchainjs/xchain-util'
 import { Account, Fees, TransactionResult, TxPage } from '../src/types/binance'
 
 const mockGetAccount = (url: string, address: string, result: Account, ntimes = 1, status = 200) => {
@@ -150,7 +150,12 @@ describe('BinanceClient Test', () => {
       sequence: 0,
     })
     let balances = await bnbClient.getBalance('bnb1v8cprldc948y7mge4yjept48xfqpa46mmcrpku')
-    expect(balances).toEqual([])
+    expect(balances.length).toEqual(1)
+
+    let amount = balances[0].amount
+
+    expect(amount.amount().isEqualTo(0)).toBeTruthy()
+    expect(assetToString(balances[0].asset)).toEqual(assetToString(AssetBNB))
 
     mockGetAccount(
       mainnetClientURL,
@@ -166,7 +171,13 @@ describe('BinanceClient Test', () => {
       404,
     )
     balances = await bnbClient.getBalance('bnb1ja07feunxx6z9kue3fn05dazt0gpn4y9e5t8rn')
-    expect(balances).toEqual([])
+
+    expect(balances.length).toEqual(1)
+
+    amount = balances[0].amount
+
+    expect(amount.amount().isEqualTo(0)).toBeTruthy()
+    expect(assetToString(balances[0].asset)).toEqual(assetToString(AssetBNB))
   })
 
   it('has balances', async () => {

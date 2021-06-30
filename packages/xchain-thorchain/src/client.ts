@@ -282,15 +282,24 @@ class Client implements ThorchainClient, XChainClient {
   getBalance = async (address: Address, assets?: Asset[]): Promise<Balances> => {
     try {
       const balances = await this.cosmosClient.getBalance(address)
-      return balances
-        .map((balance) => ({
-          asset: (balance.denom && getAsset(balance.denom)) || AssetRune,
-          amount: baseAmount(balance.amount, DECIMAL),
-        }))
-        .filter(
-          (balance) =>
-            !assets || assets.filter((asset) => assetToString(balance.asset) === assetToString(asset)).length,
-        )
+
+      let assetBalances = balances.map((balance) => ({
+        asset: (balance.denom && getAsset(balance.denom)) || AssetRune,
+        amount: baseAmount(balance.amount, DECIMAL),
+      }))
+
+      if (assetBalances.length === 0) {
+        assetBalances = [
+          {
+            asset: AssetRune,
+            amount: baseAmount(0, DECIMAL),
+          },
+        ]
+      }
+
+      return assetBalances.filter(
+        (balance) => !assets || assets.filter((asset) => assetToString(balance.asset) === assetToString(asset)).length,
+      )
     } catch (error) {
       return Promise.reject(error)
     }

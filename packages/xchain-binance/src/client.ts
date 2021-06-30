@@ -36,7 +36,7 @@ import {
   assetToString,
 } from '@xchainjs/xchain-util'
 import { validatePhrase } from '@xchainjs/xchain-crypto'
-import { isTransferFee, parseTx, getPrefix } from './util'
+import { isTransferFee, parseTx, getPrefix, BNB_DECIMAL } from './util'
 import { SignedSend } from '@binance-chain/javascript-sdk/lib/types'
 
 type PrivKey = string
@@ -244,17 +244,26 @@ class Client implements BinanceClient, XChainClient {
     try {
       const balances: BinanceBalances = await this.bncClient.getBalance(address)
 
-      return balances
-        .map((balance) => {
-          return {
-            asset: assetFromString(`${BNBChain}.${balance.symbol}`) || AssetBNB,
-            amount: assetToBase(assetAmount(balance.free, 8)),
-          }
-        })
-        .filter(
-          (balance) =>
-            !assets || assets.filter((asset) => assetToString(balance.asset) === assetToString(asset)).length,
-        )
+      let assetBalances = balances.map((balance) => {
+        return {
+          asset: assetFromString(`${BNBChain}.${balance.symbol}`) || AssetBNB,
+          amount: assetToBase(assetAmount(balance.free, 8)),
+        }
+      })
+
+      // make sure we always have the bnb asset as balance in the array
+      if (assetBalances.length === 0) {
+        assetBalances = [
+          {
+            asset: AssetBNB,
+            amount: baseAmount(0, BNB_DECIMAL),
+          },
+        ]
+      }
+
+      return assetBalances.filter(
+        (balance) => !assets || assets.filter((asset) => assetToString(balance.asset) === assetToString(asset)).length,
+      )
     } catch (error) {
       return Promise.reject(error)
     }

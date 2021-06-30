@@ -1,6 +1,6 @@
 {
   "name": "@xchainjs/xchain-util",
-  "version": "0.2.8",
+  "version": "0.2.9",
   "description": "Helper utilities for XChain clients",
   "keywords": [
     "THORChain",

@@ -243,17 +243,26 @@ class Client implements CosmosClient, XChainClient {
       const balances = await this.getSDKClient().getBalance(address)
       const mainAsset = this.getMainAsset()
 
-      return balances
-        .map((balance) => {
-          return {
-            asset: (balance.denom && getAsset(balance.denom)) || mainAsset,
-            amount: baseAmount(balance.amount, DECIMAL),
-          }
-        })
-        .filter(
-          (balance) =>
-            !assets || assets.filter((asset) => assetToString(balance.asset) === assetToString(asset)).length,
-        )
+      let assetBalances = balances.map((balance) => {
+        return {
+          asset: (balance.denom && getAsset(balance.denom)) || mainAsset,
+          amount: baseAmount(balance.amount, DECIMAL),
+        }
+      })
+
+      // make sure we always have the main asset as balance in the array
+      if (assetBalances.length === 0) {
+        assetBalances = [
+          {
+            asset: mainAsset,
+            amount: baseAmount(0, DECIMAL),
+          },
+        ]
+      }
+
+      return assetBalances.filter(
+        (balance) => !assets || assets.filter((asset) => assetToString(balance.asset) === assetToString(asset)).length,
+      )
     } catch (error) {
       return Promise.reject(error)
     }
