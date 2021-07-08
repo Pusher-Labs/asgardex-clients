@@ -49,6 +49,14 @@ describe('Client Test', () => {
     nock.cleanAll()
   })
 
+  it('creates a client without a phrase', () => {
+    expect(() => {
+      new Client({
+        network: 'testnet',
+      })
+    }).not.toThrow()
+  })
+
   it('should throw error on bad phrase', () => {
     expect(() => {
       new Client({ phrase: 'bad bad phrase' })

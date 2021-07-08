@@ -117,7 +117,7 @@ export default class Client extends BaseXChainClient implements XChainClient, Et
     this.ethplorerApiKey = ethplorerApiKey
     this.explorerUrl = explorerUrl || this.getDefaultExplorerURL()
     this.setupProviders()
-    this.setPhrase(phrase)
+    phrase && this.setPhrase(phrase)
   }
 
   /**

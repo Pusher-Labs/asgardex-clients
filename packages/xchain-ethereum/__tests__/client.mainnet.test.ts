@@ -27,6 +27,14 @@ describe('Client Test', () => {
     nock.cleanAll()
   })
 
+  it('creates a client without a phrase', () => {
+    expect(() => {
+      new Client({
+        network: 'mainnet',
+      })
+    }).not.toThrow()
+  })
+
   it('derive path correctly with bip44', () => {
     const ethClient = new Client({
       network: 'mainnet' as Network,
