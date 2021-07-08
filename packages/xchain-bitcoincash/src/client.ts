@@ -276,7 +276,7 @@ class Client extends UTXOClient {
     const derivationPath = this.getFullDerivationPath(index)
 
     const feeRate = params.feeRate || (await this.getFeeRates())[FeeOption.Fast]
-    const { builder, utxos } = await utils.buildTx({
+    const { builder, inputUTXOs } = await utils.buildTx({
       ...params,
       feeRate,
       sender: this.getAddress(index),
@@ -286,7 +286,7 @@ class Client extends UTXOClient {
 
     const keyPair = this.getBCHKeys(this.phrase, derivationPath)
 
-    utxos.forEach((utxo, index) => {
+    inputUTXOs.forEach((utxo, index) => {
       builder.sign(index, keyPair, undefined, 0x41, utxo.witnessUtxo.value)
     })
 

@@ -249,7 +249,7 @@ export const buildTx = async ({
   haskoinUrl: string
 }): Promise<{
   builder: TransactionBuilder
-  utxos: UTXO[]
+  inputUTXOs: UTXO[]
 }> => {
   const recipientCashAddress = toCashAddress(recipient)
   if (!validateAddress(recipientCashAddress, network)) throw new Error('Invalid address')
@@ -298,7 +298,7 @@ export const buildTx = async ({
 
   return {
     builder: transactionBuilder,
-    utxos,
+    inputUTXOs: inputs,
   }
 }
 
