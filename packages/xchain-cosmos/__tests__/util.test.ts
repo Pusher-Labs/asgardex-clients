@@ -6,7 +6,7 @@ import { MsgMultiSend, MsgSend } from 'cosmos-client/x/bank'
 
 import { APIQueryParam, RawTxResponse, TxResponse } from '../src/cosmos/types'
 import { AssetAtom, AssetMuon } from '../src/types'
-import { getAsset, getDenom, getQueryString, getTxsFromHistory, isMsgMultiSend, isMsgSend } from '../src/util'
+import { getAsset, getDenom, getQueryString, isMsgMultiSend, isMsgSend, parseTxResponse } from '../src/util'
 
 describe('cosmos/util', () => {
   describe('Msg type guards', () => {
@@ -183,7 +183,7 @@ describe('cosmos/util', () => {
     ]
 
     it('parse Tx', () => {
-      const parsed_txs = getTxsFromHistory(txs, AssetAtom)
+      const parsed_txs = txs.map((x) => parseTxResponse(x, AssetAtom))
 
       expect(parsed_txs.length).toEqual(2)
 

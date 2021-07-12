@@ -1,9 +1,9 @@
 import BigNumber from 'bignumber.js'
 
 import { fixedBN, formatBN } from './bn'
-import { Chain, isChain } from './chain'
+import { isChain } from './chain'
 import { trimZeros as trimZerosHelper } from './string'
-import { Amount, Asset, AssetAmount, BaseAmount, Denomination } from './types'
+import { Amount, Asset, AssetAmount, BaseAmount, Chain, Denomination } from './types'
 
 /**
  * Guard to check whether value is a BigNumber.Value or not

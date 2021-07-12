@@ -1,4 +1,3 @@
-import { Network } from '@xchainjs/xchain-client'
 import { baseAmount } from '@xchainjs/xchain-util'
 
 import {
@@ -11,14 +10,16 @@ import {
   mock_getTransactions,
   mock_getUnspents,
 } from '../__mocks__/api'
-import { Client } from '../src/client'
+import { Client, MAINNET_PARAMS, TESTNET_PARAMS } from '../src/client'
 import { BCH_DECIMAL } from '../src/utils'
+import { Wallet } from '../src/wallet'
 
-const bchClient = new Client({ network: 'mainnet' as Network })
+let bchClient: Client
 
 describe('BCHClient Test', () => {
-  beforeEach(() => bchClient.purgeClient())
-  afterEach(() => bchClient.purgeClient())
+  beforeEach(async () => {
+    bchClient = await Client.create(MAINNET_PARAMS)
+  })
 
   const MEMO = 'SWAP:THOR.RUNE'
   const phrase = 'atom green various power must another rent imitate gadget creek fat then'
@@ -27,75 +28,73 @@ describe('BCHClient Test', () => {
   const mainnet_address_path0 = 'qp4kjpk684c3d9qjk5a37vl2xn86wxl0f5j2ru0daj'
   const mainnet_address_path1 = 'qr4jrkhu3usuk8ghv60m7pg9eywuc79yqvd0wxt2lm'
 
-  it('set phrase should return correct address', () => {
-    bchClient.setNetwork('testnet' as Network)
-    expect(bchClient.setPhrase(phrase)).toEqual(testnet_address_path0)
+  it('set phrase should return correct address', async () => {
+    bchClient = await Client.create(TESTNET_PARAMS, Wallet.create(phrase))
+    expect(await bchClient.getAddress()).toEqual(testnet_address_path0)
 
-    bchClient.setNetwork('mainnet' as Network)
-    expect(bchClient.setPhrase(phrase)).toEqual(mainnet_address_path0)
+    bchClient = await Client.create(MAINNET_PARAMS, Wallet.create(phrase))
+    expect(await bchClient.getAddress()).toEqual(mainnet_address_path0)
   })
 
-  it('set phrase with derivation path should return correct address', () => {
-    bchClient.setNetwork('testnet' as Network)
-    expect(bchClient.setPhrase(phrase)).toEqual(testnet_address_path0)
-    expect(bchClient.getAddress(1)).toEqual(testnet_address_path1)
+  it('set phrase with derivation path should return correct address', async () => {
+    bchClient = await Client.create(TESTNET_PARAMS, Wallet.create(phrase))
+    expect(await bchClient.getAddress(0)).toEqual(testnet_address_path0)
+    expect(await bchClient.getAddress(1)).toEqual(testnet_address_path1)
 
-    bchClient.setNetwork('mainnet' as Network)
-    expect(bchClient.setPhrase(phrase)).toEqual(mainnet_address_path0)
-    expect(bchClient.getAddress(1)).toEqual(mainnet_address_path1)
+    bchClient = await Client.create(MAINNET_PARAMS, Wallet.create(phrase))
+    expect(await bchClient.getAddress(0)).toEqual(mainnet_address_path0)
+    expect(await bchClient.getAddress(1)).toEqual(mainnet_address_path1)
   })
 
-  it('should throw an error for setting a bad phrase', () => {
-    expect(() => bchClient.setPhrase('cat')).toThrow()
+  it('should throw an error for setting a bad phrase', async () => {
+    await expect(bchClient.unlock(Wallet.create('cat'))).rejects.toThrow()
   })
 
-  it('should not throw an error for setting a good phrase', () => {
-    expect(bchClient.setPhrase(phrase)).toBeUndefined
+  it('should not throw an error for setting a good phrase', async () => {
+    await expect(bchClient.unlock(Wallet.create(phrase))).resolves.not.toThrow()
   })
 
-  it('should validate the right address', () => {
-    bchClient.setNetwork('testnet' as Network)
-    bchClient.setPhrase(phrase)
-    expect(bchClient.getAddress()).toEqual(testnet_address_path0)
-    expect(bchClient.validateAddress(testnet_address_path0)).toBeTruthy()
+  it('should validate the right address', async () => {
+    bchClient = await Client.create(TESTNET_PARAMS, Wallet.create(phrase))
+    expect(await bchClient.getAddress()).toEqual(testnet_address_path0)
+    expect(await bchClient.validateAddress(testnet_address_path0)).toBeTruthy()
 
-    bchClient.setNetwork('mainnet' as Network)
-    expect(bchClient.validateAddress(mainnet_address_path0)).toBeTruthy()
+    bchClient = await Client.create(MAINNET_PARAMS, Wallet.create(phrase))
+    expect(await bchClient.validateAddress(mainnet_address_path0)).toBeTruthy()
   })
 
-  it('should return valid explorer url', () => {
-    bchClient.setNetwork('mainnet' as Network)
+  it('should return valid explorer url', async () => {
+    bchClient = await Client.create(MAINNET_PARAMS, Wallet.create(phrase))
     expect(bchClient.getExplorerUrl()).toEqual('https://www.blockchain.com/bch')
 
-    bchClient.setNetwork('testnet' as Network)
+    bchClient = await Client.create(TESTNET_PARAMS, Wallet.create(phrase))
     expect(bchClient.getExplorerUrl()).toEqual('https://www.blockchain.com/bch-testnet')
   })
 
-  it('should retrun valid explorer address url', () => {
-    bchClient.setNetwork('mainnet' as Network)
+  it('should retrun valid explorer address url', async () => {
+    bchClient = await Client.create(MAINNET_PARAMS, Wallet.create(phrase))
     expect(bchClient.getExplorerAddressUrl('testAddressHere')).toEqual(
       'https://www.blockchain.com/bch/address/testAddressHere',
     )
-    bchClient.setNetwork('testnet' as Network)
+    bchClient = await Client.create(TESTNET_PARAMS, Wallet.create(phrase))
     expect(bchClient.getExplorerAddressUrl('anotherTestAddressHere')).toEqual(
       'https://www.blockchain.com/bch-testnet/address/anotherTestAddressHere',
     )
   })
 
-  it('should retrun valid explorer tx url', () => {
-    bchClient.setNetwork('mainnet' as Network)
+  it('should retrun valid explorer tx url', async () => {
+    bchClient = await Client.create(MAINNET_PARAMS, Wallet.create(phrase))
     expect(bchClient.getExplorerTxUrl('testTxHere')).toEqual('https://www.blockchain.com/bch/tx/testTxHere')
-    bchClient.setNetwork('testnet' as Network)
+    bchClient = await Client.create(TESTNET_PARAMS, Wallet.create(phrase))
     expect(bchClient.getExplorerTxUrl('anotherTestTxHere')).toEqual(
       'https://www.blockchain.com/bch-testnet/tx/anotherTestTxHere',
     )
   })
 
   it('should get the right balance', async () => {
-    bchClient.setNetwork('testnet' as Network)
-    bchClient.setPhrase(phrase)
+    bchClient = await Client.create(TESTNET_PARAMS, Wallet.create(phrase))
 
-    mock_getBalance(bchClient.getHaskoinURL(), bchClient.getAddress(), {
+    mock_getBalance(bchClient.params.haskoinUrl, await bchClient.getAddress(), {
       received: 124442749359,
       utxo: 1336,
       address: 'bchtest:qz35h5mfa8w2pqma2jq06lp7dnv5fxkp2svtllzmlf',
@@ -103,16 +102,15 @@ describe('BCHClient Test', () => {
       unconfirmed: 0,
       confirmed: 0,
     })
-    const balance = await bchClient.getBalance(bchClient.getAddress())
+    const balance = await bchClient.getBalance(await bchClient.getAddress())
     expect(balance.length).toEqual(1)
     expect(balance[0].amount.amount().toNumber()).toEqual(0)
   })
 
   it('should get the right balance', async () => {
-    bchClient.setNetwork('testnet' as Network)
-    bchClient.setPhrase(phrase)
+    bchClient = await Client.create(TESTNET_PARAMS, Wallet.create(phrase))
 
-    mock_getBalance(bchClient.getHaskoinURL(), bchClient.getAddress(), {
+    mock_getBalance(bchClient.params.haskoinUrl, await bchClient.getAddress(), {
       received: 123817511737,
       utxo: 1336,
       address: 'bchtest:qz35h5mfa8w2pqma2jq06lp7dnv5fxkp2svtllzmlf',
@@ -120,17 +118,16 @@ describe('BCHClient Test', () => {
       unconfirmed: 100000000000,
       confirmed: 123817511737,
     })
-    const balance = await bchClient.getBalance(bchClient.getAddress())
+    const balance = await bchClient.getBalance(await bchClient.getAddress())
     expect(balance.length).toEqual(1)
     expect(balance[0].amount.amount().isEqualTo('223817511737')).toBeTruthy()
   })
 
   it('should get transaction data', async () => {
-    bchClient.setNetwork('testnet' as Network)
-    bchClient.setPhrase(phrase)
+    bchClient = await Client.create(TESTNET_PARAMS, Wallet.create(phrase))
 
     mock_getTransactionData(
-      bchClient.getHaskoinURL(),
+      bchClient.params.haskoinUrl,
       '0d5764c89d3fbf8bea9b329ad5e0ddb6047e72313c0f7b54dcb14f4d242da64b',
       {
         time: 1548767230,
@@ -196,10 +193,9 @@ describe('BCHClient Test', () => {
   })
 
   it('should get transactions', async () => {
-    bchClient.setNetwork('testnet' as Network)
-    bchClient.setPhrase(phrase)
+    bchClient = await Client.create(TESTNET_PARAMS, Wallet.create(phrase))
 
-    mock_getBalance(bchClient.getHaskoinURL(), 'bchtest:qz35h5mfa8w2pqma2jq06lp7dnv5fxkp2svtllzmlf', {
+    mock_getBalance(bchClient.params.haskoinUrl, 'bchtest:qz35h5mfa8w2pqma2jq06lp7dnv5fxkp2svtllzmlf', {
       received: 124442749359,
       utxo: 1336,
       address: 'bchtest:qz35h5mfa8w2pqma2jq06lp7dnv5fxkp2svtllzmlf',
@@ -207,7 +203,7 @@ describe('BCHClient Test', () => {
       unconfirmed: 0,
       confirmed: 0,
     })
-    mock_getTransactions(bchClient.getHaskoinURL(), 'bchtest:qz35h5mfa8w2pqma2jq06lp7dnv5fxkp2svtllzmlf', [
+    mock_getTransactions(bchClient.params.haskoinUrl, 'bchtest:qz35h5mfa8w2pqma2jq06lp7dnv5fxkp2svtllzmlf', [
       {
         time: 1548767230,
         size: 245,
@@ -273,27 +269,26 @@ describe('BCHClient Test', () => {
   })
 
   it('should transfer bch', async () => {
-    bchClient.setNetwork('testnet' as Network)
-    bchClient.setPhrase(phrase)
+    bchClient = await Client.create(TESTNET_PARAMS, Wallet.create(phrase))
 
     mock_getBalance(
-      bchClient.getHaskoinURL(),
-      bchClient.getAddress(),
+      bchClient.params.haskoinUrl,
+      await bchClient.getAddress(),
       {
         received: 12964626,
         utxo: 1,
-        address: bchClient.getAddress(),
+        address: await bchClient.getAddress(),
         txs: 13,
         unconfirmed: 0,
         confirmed: 992999,
       },
       2,
     )
-    mock_getUnspents(bchClient.getHaskoinURL(), bchClient.getAddress(), [
+    mock_getUnspents(bchClient.params.haskoinUrl, await bchClient.getAddress(), [
       {
         pkscript: '76a9145be96e4fbfd68370cfd30ad2f3458c580f09afb188ac',
         value: 992999,
-        address: bchClient.getAddress(),
+        address: await bchClient.getAddress(),
         block: {
           height: 1436370,
           position: 4,
@@ -303,7 +298,7 @@ describe('BCHClient Test', () => {
       },
     ])
     mock_getRawTransactionData(
-      bchClient.getHaskoinURL(),
+      bchClient.params.haskoinUrl,
       '66f090bd35b15a4a8ede2f71184cf4d2cc08483921752b845ba2fdee7b96ca79',
       {
         result:
@@ -311,7 +306,7 @@ describe('BCHClient Test', () => {
       },
     )
     mock_estimateFee()
-    mock_broadcastTx(bchClient.getNodeURL(), '82b65a0006697bff406c62ad0b3fd07db9f20ce6fbc468c81679d96aebc36f69')
+    mock_broadcastTx(await bchClient.params.nodeUrl, '82b65a0006697bff406c62ad0b3fd07db9f20ce6fbc468c81679d96aebc36f69')
 
     const txId = await bchClient.transfer({
       walletIndex: 0,
@@ -323,26 +318,26 @@ describe('BCHClient Test', () => {
   })
 
   it('should transfer bch to a legacy address format', async () => {
-    bchClient.setNetwork('testnet' as Network)
-    bchClient.setPhrase(phrase)
+    bchClient = await Client.create(TESTNET_PARAMS, Wallet.create(phrase))
+
     mock_getBalance(
-      bchClient.getHaskoinURL(),
-      bchClient.getAddress(),
+      bchClient.params.haskoinUrl,
+      await bchClient.getAddress(),
       {
         received: 12964626,
         utxo: 1,
-        address: bchClient.getAddress(),
+        address: await bchClient.getAddress(),
         txs: 13,
         unconfirmed: 0,
         confirmed: 992999,
       },
       2,
     )
-    mock_getUnspents(bchClient.getHaskoinURL(), bchClient.getAddress(), [
+    mock_getUnspents(bchClient.params.haskoinUrl, await bchClient.getAddress(), [
       {
         pkscript: '76a9145be96e4fbfd68370cfd30ad2f3458c580f09afb188ac',
         value: 992999,
-        address: bchClient.getAddress(),
+        address: await bchClient.getAddress(),
         block: {
           height: 1436370,
           position: 4,
@@ -352,7 +347,7 @@ describe('BCHClient Test', () => {
       },
     ])
     mock_getRawTransactionData(
-      bchClient.getHaskoinURL(),
+      bchClient.params.haskoinUrl,
       '66f090bd35b15a4a8ede2f71184cf4d2cc08483921752b845ba2fdee7b96ca79',
       {
         result:
@@ -360,7 +355,7 @@ describe('BCHClient Test', () => {
       },
     )
     mock_estimateFee()
-    mock_broadcastTx(bchClient.getNodeURL(), '82b65a0006697bff406c62ad0b3fd07db9f20ce6fbc468c81679d96aebc36f69')
+    mock_broadcastTx(bchClient.params.nodeUrl, '82b65a0006697bff406c62ad0b3fd07db9f20ce6fbc468c81679d96aebc36f69')
 
     const txId = await bchClient.transfer({
       walletIndex: 0,
@@ -371,8 +366,7 @@ describe('BCHClient Test', () => {
     expect(txId).toEqual('82b65a0006697bff406c62ad0b3fd07db9f20ce6fbc468c81679d96aebc36f69')
   })
   it('returns fees and rates of a normal tx', async () => {
-    bchClient.setNetwork('testnet' as Network)
-    bchClient.setPhrase(phrase)
+    bchClient = await Client.create(TESTNET_PARAMS, Wallet.create(phrase))
 
     mock_estimateFee()
 
@@ -387,8 +381,7 @@ describe('BCHClient Test', () => {
     expect(rates.average).toBeDefined()
   })
   it('returns fees and rates(from thornodeAPI) of a normal tx', async () => {
-    bchClient.setNetwork('testnet' as Network)
-    bchClient.setPhrase(phrase)
+    bchClient = await Client.create(TESTNET_PARAMS, Wallet.create(phrase))
 
     mock_estimateFeeFromThor()
 
@@ -403,8 +396,7 @@ describe('BCHClient Test', () => {
     expect(rates.average).toBeDefined()
   })
   it('returns fees and rates of a tx w/ memo', async () => {
-    bchClient.setNetwork('testnet' as Network)
-    bchClient.setPhrase(phrase)
+    bchClient = await Client.create(TESTNET_PARAMS, Wallet.create(phrase))
 
     mock_estimateFee()
 
@@ -420,8 +412,7 @@ describe('BCHClient Test', () => {
   })
 
   it('should return estimated fees of a normal tx', async () => {
-    bchClient.setNetwork('testnet' as Network)
-    bchClient.setPhrase(phrase)
+    bchClient = await Client.create(TESTNET_PARAMS, Wallet.create(phrase))
 
     mock_estimateFee()
 
@@ -432,8 +423,7 @@ describe('BCHClient Test', () => {
   })
 
   it('returns different fee rates for a normal tx', async () => {
-    bchClient.setNetwork('testnet' as Network)
-    bchClient.setPhrase(phrase)
+    bchClient = await Client.create(TESTNET_PARAMS, Wallet.create(phrase))
 
     mock_estimateFee()
 

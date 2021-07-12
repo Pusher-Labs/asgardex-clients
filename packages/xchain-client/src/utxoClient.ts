@@ -1,9 +1,16 @@
-import { BaseXChainClient as Client } from './BaseXChainClient'
-import { standardFeeRates } from './feeRates'
+import { Client, ClientParams, Wallet } from './client'
+import { getFeeRateFromThorchain, standardFeeRates } from './feeRates'
 import { calcFeesAsync } from './fees'
-import { Fee, FeeRate, FeeRates, Fees, FeesWithRates } from './types'
+import { Fee, FeeRate, FeeRates, Fees, FeesWithRates, TxHash, TxParams } from './types'
 
-export abstract class UTXOClient extends Client {
+export interface UTXOClientParams extends ClientParams {
+  thornodeUrl?: string
+}
+
+export abstract class UTXOClient<ClientParamsType extends UTXOClientParams, WalletType extends Wallet> extends Client<
+  ClientParamsType,
+  WalletType
+> {
   protected abstract getSuggestedFeeRate(): Promise<FeeRate>
   protected abstract calcFee(feeRate: FeeRate, memo?: string): Promise<Fee>
 
@@ -31,7 +38,7 @@ export abstract class UTXOClient extends Client {
   async getFeeRates(): Promise<FeeRates> {
     const feeRate: FeeRate = await (async () => {
       try {
-        return await this.getFeeRateFromThorchain()
+        if (this.params.thornodeUrl) return await getFeeRateFromThorchain(this.params.thornodeUrl, this.params.chain)
       } catch (error) {
         console.warn(`Rate lookup via Thorchain failed: ${error}`)
       }
@@ -40,4 +47,6 @@ export abstract class UTXOClient extends Client {
 
     return standardFeeRates(feeRate)
   }
+
+  abstract transfer(params: TxParams & { walletIndex?: number; feeRate?: FeeRate }): Promise<TxHash>
 }

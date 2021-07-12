@@ -1,4 +1,5 @@
-export * from './cosmos'
 export * from './client'
+export * from './cosmos'
 export * from './types'
 export * from './util'
+export * from './wallet'

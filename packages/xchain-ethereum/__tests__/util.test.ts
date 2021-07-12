@@ -11,7 +11,6 @@ import {
   filterSelfTxs,
   getDecimal,
   getDefaultFees,
-  getPrefix,
   getTokenAddress,
   getTokenBalances,
   getTxFromEthTransaction,
@@ -93,13 +92,6 @@ describe('ethereum/util', () => {
       expect(defaultFee.average.amount().isEqualTo(baseAmount('1050000000000000', ETH_DECIMAL).amount())).toBeTruthy()
       expect(defaultFee.fast.amount().isEqualTo(baseAmount('2100000000000000', ETH_DECIMAL).amount())).toBeTruthy()
       expect(defaultFee.fastest.amount().isEqualTo(baseAmount('3150000000000000', ETH_DECIMAL).amount())).toBeTruthy()
-    })
-  })
-
-  describe('getPrefix', () => {
-    it('should return the prefix ', () => {
-      const prefix = getPrefix()
-      expect(prefix).toEqual('0x')
     })
   })
 

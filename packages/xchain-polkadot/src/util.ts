@@ -34,19 +34,3 @@ export const getDefaultFees = (network: Network): Fees => {
 
   return singleFee(FeeType.PerByte, fee)
 }
-
-/**
- * Get address prefix based on the network.
- *
- * @param {Network} network
- * @returns {string} The address prefix based on the network.
- *
- **/
-export const getPrefix = (network: Network) => {
-  switch (network) {
-    case Network.Mainnet:
-      return '1'
-    case Network.Testnet:
-      return '5'
-  }
-}

@@ -1,8 +1,7 @@
 import { FeeType, Fees, Tx, TxFrom, TxTo, TxType } from '@xchainjs/xchain-client'
-import { Asset, assetToString, baseAmount } from '@xchainjs/xchain-util'
+import { Asset, BaseAmount, assetToString, baseAmount } from '@xchainjs/xchain-util'
 import { Msg, codec } from 'cosmos-client'
-import { StdTx } from 'cosmos-client/x/auth'
-import { MsgMultiSend, MsgSend } from 'cosmos-client/x/bank'
+import { Input, MsgMultiSend, MsgSend, Output } from 'cosmos-client/x/bank'
 
 import { APIQueryParam, RawTxResponse, TxResponse } from './cosmos/types'
 import { AssetAtom, AssetMuon } from './types'
@@ -63,112 +62,94 @@ export const getAsset = (denom: string): Asset | null => {
  * @param {Asset} mainAsset Current main asset which depends on the network.
  * @returns {Tx[]} The parsed transaction result.
  */
-export const getTxsFromHistory = (txs: TxResponse[], mainAsset: Asset): Tx[] => {
-  return txs.reduce((acc, tx) => {
-    let msgs: Msg[] = []
-    if ((tx.tx as RawTxResponse).body === undefined) {
-      msgs = codec.fromJSONString(codec.toJSONString(tx.tx as StdTx)).msg
+export const parseTxResponse = (
+  tx: TxResponse,
+  mainAsset: Asset,
+): Tx & {
+  msgs: Array<{
+    type: string
+    value: Record<string, unknown>
+  }>
+} => {
+  const rawTxTx = tx.tx
+  if (rawTxTx === undefined) throw new Error("can't parse TxResponse with missing 'tx' property")
+  const txTx: Exclude<typeof rawTxTx, codec.AminoWrapping> = codec.fromJSONString(codec.toJSONString(rawTxTx))
+
+  const isRecord = (x: unknown): x is Record<string, unknown> => ['object', 'function'].includes(typeof x) && x !== null
+  const isRawTxResponse = (x: unknown): x is RawTxResponse => isRecord(x) && 'body' in x && x.body !== undefined
+
+  const msgs: Msg[] = (() => {
+    if (isRawTxResponse(txTx)) {
+      return txTx.body.messages
     } else {
-      msgs = codec.fromJSONString(codec.toJSONString((tx.tx as RawTxResponse).body.messages))
+      return txTx.msg
     }
+  })()
 
-    const from: TxFrom[] = []
-    const to: TxTo[] = []
-    msgs.map((msg) => {
-      if (isMsgSend(msg)) {
-        const msgSend = msg as MsgSend
-        const amount = msgSend.amount
-          .map((coin) => baseAmount(coin.amount, 6))
-          .reduce((acc, cur) => baseAmount(acc.amount().plus(cur.amount()), 6), baseAmount(0, 6))
+  const inputs: Input[] = []
+  const outputs: Output[] = []
+  for (const msg of msgs) {
+    if (isMsgSend(msg)) {
+      inputs.push({
+        address: msg.from_address.toBech32(),
+        coins: [...msg.amount],
+      })
+      outputs.push({
+        address: msg.to_address.toBech32(),
+        coins: [...msg.amount],
+      })
+    } else if (isMsgMultiSend(msg)) {
+      inputs.push(...msg.inputs)
+      outputs.push(...msg.outputs)
+    }
+  }
 
-        let from_index = -1
+  const deduplicate = <T extends Input | Output>(a: T[], x: T) => {
+    const i = a.findIndex((y) => y.address === x.address)
+    if (i !== -1) {
+      a[i].coins.push(...x.coins)
+    } else {
+      a.push(x)
+    }
+    return a
+  }
 
-        from.forEach((value, index) => {
-          if (value.from === msgSend.from_address.toBech32()) from_index = index
-        })
-
-        if (from_index === -1) {
-          from.push({
-            from: msgSend.from_address.toBech32(),
-            amount,
-          })
-        } else {
-          from[from_index].amount = baseAmount(from[from_index].amount.amount().plus(amount.amount()), 6)
+  const sumCoins = (coins: Input['coins']) => {
+    return coins.reduce<{ denom?: string; baseAmount: BaseAmount }>(
+      (acc, coin) => {
+        const coinAmount = baseAmount(coin.amount, 6).amount()
+        const denom = acc.denom ?? coin.denom
+        if (coin.denom !== denom) throw new Error("can't add Coins of different denominations")
+        return {
+          denom,
+          baseAmount: baseAmount(acc.baseAmount.amount().plus(coinAmount), 6),
         }
-
-        let to_index = -1
-
-        to.forEach((value, index) => {
-          if (value.to === msgSend.to_address.toBech32()) to_index = index
-        })
-
-        if (to_index === -1) {
-          to.push({
-            to: msgSend.to_address.toBech32(),
-            amount,
-          })
-        } else {
-          to[to_index].amount = baseAmount(to[to_index].amount.amount().plus(amount.amount()), 6)
-        }
-      } else if (isMsgMultiSend(msg)) {
-        const msgMultiSend = msg as MsgMultiSend
-
-        msgMultiSend.inputs.map((input) => {
-          const amount = input.coins
-            .map((coin) => baseAmount(coin.amount, 6))
-            .reduce((acc, cur) => baseAmount(acc.amount().plus(cur.amount()), 6), baseAmount(0, 6))
-
-          let from_index = -1
-
-          from.forEach((value, index) => {
-            if (value.from === input.address) from_index = index
-          })
-
-          if (from_index === -1) {
-            from.push({
-              from: input.address,
-              amount,
-            })
-          } else {
-            from[from_index].amount = baseAmount(from[from_index].amount.amount().plus(amount.amount()), 6)
-          }
-        })
-
-        msgMultiSend.outputs.map((output) => {
-          const amount = output.coins
-            .map((coin) => baseAmount(coin.amount, 6))
-            .reduce((acc, cur) => baseAmount(acc.amount().plus(cur.amount()), 6), baseAmount(0, 6))
-
-          let to_index = -1
-
-          to.forEach((value, index) => {
-            if (value.to === output.address) to_index = index
-          })
-
-          if (to_index === -1) {
-            to.push({
-              to: output.address,
-              amount,
-            })
-          } else {
-            to[to_index].amount = baseAmount(to[to_index].amount.amount().plus(amount.amount()), 6)
-          }
-        })
-      }
-    })
-
-    return [
-      ...acc,
-      {
-        asset: mainAsset,
-        from,
-        to,
-        date: new Date(tx.timestamp),
-        type: from.length > 0 || to.length > 0 ? TxType.Transfer : TxType.Unknown,
-        hash: tx.txhash || '',
       },
-    ]
-  }, [] as Tx[])
+      {
+        denom: undefined,
+        baseAmount: baseAmount(0, 6),
+      },
+    ).baseAmount
+  }
+
+  const from: TxFrom[] = inputs.reduce(deduplicate, [] as Input[]).map((input) => ({
+    from: input.address,
+    amount: sumCoins(input.coins),
+  }))
+  const to: TxTo[] = outputs.reduce(deduplicate, [] as Output[]).map((output) => ({
+    to: output.address,
+    amount: sumCoins(output.coins),
+  }))
+
+  return {
+    asset: mainAsset,
+    from,
+    to,
+    msgs: JSON.parse(codec.toJSONString(msgs)),
+    date: new Date(tx.timestamp),
+    type: from.length > 0 || to.length > 0 ? TxType.Transfer : TxType.Unknown,
+    hash: tx.txhash ?? '',
+  }
 }
 
 /**
@@ -207,11 +188,3 @@ export const getDefaultFees = (): Fees => {
     average: baseAmount(0, DECIMAL),
   }
 }
-
-/**
- * Get address prefix based on the network.
- *
- * @returns {string} The address prefix based on the network.
- *
- **/
-export const getPrefix = () => 'cosmos'

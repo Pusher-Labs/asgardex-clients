@@ -1,10 +1,10 @@
-import { Network } from '@xchainjs/xchain-client'
 import { baseAmount } from '@xchainjs/xchain-util'
 import nock from 'nock'
 
 import { mock_ethplorer_api_getTxInfo } from '../__mocks__/ethplorer-api'
 import { mock_thornode_inbound_addresses_success } from '../__mocks__/thornode-api'
-import Client from '../src/client'
+import { Client, MAINNET_PARAMS } from '../src/client'
+import { Wallet } from '../src/wallet'
 
 const phrase = 'canyon throw labor waste awful century ugly they found post source draft'
 // https://iancoleman.io/bip39/
@@ -19,23 +19,19 @@ const thornodeApiUrl = 'https://thornode.thorchain.info'
  * Wallet Tests
  */
 describe('Client Test', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     nock.disableNetConnect()
   })
 
-  afterEach(() => {
+  afterEach(async () => {
     nock.cleanAll()
   })
 
-  it('derive path correctly with bip44', () => {
-    const ethClient = new Client({
-      network: 'mainnet' as Network,
-      phrase,
-      ethplorerUrl,
-    })
+  it('derive path correctly with bip44', async () => {
+    const ethClient = await Client.create(MAINNET_PARAMS, Wallet.create(phrase))
 
-    expect(ethClient.getAddress(0)).toEqual(addrPath0.toLowerCase())
-    expect(ethClient.getAddress(1)).toEqual(addrPath1.toLowerCase())
+    expect(await ethClient.getAddress(0)).toEqual(addrPath0.toLowerCase())
+    expect(await ethClient.getAddress(1)).toEqual(addrPath1.toLowerCase())
   })
 
   it('estimateGasPrices', async () => {
@@ -44,10 +40,7 @@ describe('Client Test', () => {
       require('../__mocks__/responses/inbound_addresses_mainnet.json'),
     )
 
-    const ethClient = new Client({
-      network: 'mainnet' as Network,
-      phrase,
-    })
+    const ethClient = await Client.create(MAINNET_PARAMS, Wallet.create(phrase))
 
     const { fast, fastest, average } = await ethClient.estimateGasPrices()
 
@@ -57,11 +50,7 @@ describe('Client Test', () => {
   })
 
   it('get transaction data', async () => {
-    const ethClient = new Client({
-      network: 'mainnet' as Network,
-      phrase,
-      ethplorerUrl,
-    })
+    const ethClient = await Client.create(MAINNET_PARAMS, Wallet.create(phrase))
 
     mock_ethplorer_api_getTxInfo(ethplorerUrl, '0xc058a6e70f043f0887ba0d43198fb31f1752632ef06f7e975e193160fd14897c', {
       hash: '0xc058a6e70f043f0887ba0d43198fb31f1752632ef06f7e975e193160fd14897c',

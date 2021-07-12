@@ -5,10 +5,10 @@ export {
   broadcastTx,
   getDefaultFees,
   getDefaultFeesWithRates,
-  getPrefix,
   scanUTXOs,
   buildTx,
   validateAddress,
   calcFee,
 } from './utils'
 export { createTxInfo } from './ledger'
+export * from './wallet'

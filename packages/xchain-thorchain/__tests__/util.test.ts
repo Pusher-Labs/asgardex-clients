@@ -1,16 +1,11 @@
-import { Network } from '@xchainjs/xchain-client'
 import { assetAmount, assetToBase } from '@xchainjs/xchain-util'
 
 import { AssetRune } from '../src/types'
 import {
   getAsset,
-  getDefaultExplorerUrls,
   getDenom,
   getDenomWithChain,
   getDepositTxDataFromLogs,
-  getExplorerAddressUrl,
-  getExplorerTxUrl,
-  getExplorerUrl,
   getTxType,
   isBroadcastSuccess,
 } from '../src/util'
@@ -108,36 +103,6 @@ describe('thorchain/util', () => {
       it('invalidates isBroadcastSuccess', () => {
         expect(isBroadcastSuccess({})).toBeFalsy()
       })
-    })
-  })
-
-  describe('explorer url', () => {
-    it('should return valid explorer url', () => {
-      expect(getExplorerUrl(getDefaultExplorerUrls(), 'testnet' as Network)).toEqual(
-        'https://viewblock.io/thorchain?network=testnet',
-      )
-
-      expect(getExplorerUrl(getDefaultExplorerUrls(), 'mainnet' as Network)).toEqual('https://viewblock.io/thorchain')
-    })
-
-    it('should retrun valid explorer address url', () => {
-      expect(
-        getExplorerAddressUrl({ urls: getDefaultExplorerUrls(), network: 'testnet' as Network, address: 'tthorabc' }),
-      ).toEqual('https://viewblock.io/thorchain/address/tthorabc?network=testnet')
-
-      expect(
-        getExplorerAddressUrl({ urls: getDefaultExplorerUrls(), network: 'mainnet' as Network, address: 'thorabc' }),
-      ).toEqual('https://viewblock.io/thorchain/address/thorabc')
-    })
-
-    it('should retrun valid explorer tx url', () => {
-      expect(
-        getExplorerTxUrl({ urls: getDefaultExplorerUrls(), network: 'testnet' as Network, txID: 'txhash' }),
-      ).toEqual('https://viewblock.io/thorchain/tx/txhash?network=testnet')
-
-      expect(
-        getExplorerTxUrl({ urls: getDefaultExplorerUrls(), network: 'mainnet' as Network, txID: 'txhash' }),
-      ).toEqual('https://viewblock.io/thorchain/tx/txhash')
     })
   })
 })

@@ -3,23 +3,24 @@ import { EtherscanProvider, getDefaultProvider } from '@ethersproject/providers'
 import {
   Address,
   Balance,
-  BaseXChainClient,
+  Client as BaseClient,
+  ClientParams as BaseClientParams,
   FeeOption,
-  FeeType,
   Fees,
+  MultiAssetClient,
   Network,
   Tx,
   TxHash,
   TxHistoryParams,
   TxParams,
   TxsPage,
-  XChainClient,
-  XChainClientParams,
+  calcFeesAsync,
+  getFeeRateFromThorchain,
   standardFeeRates,
 } from '@xchainjs/xchain-client'
 import { Asset, AssetETH, BaseAmount, Chain, assetToString, baseAmount, delay } from '@xchainjs/xchain-util'
-import { BigNumber, BigNumberish, Wallet, ethers } from 'ethers'
-import { HDNode, parseUnits, toUtf8Bytes } from 'ethers/lib/utils'
+import { BigNumber, BigNumberish, ethers } from 'ethers'
+import { parseUnits, toUtf8Bytes } from 'ethers/lib/utils'
 
 import erc20ABI from './data/erc20.json'
 import * as etherscanAPI from './etherscan-api'
@@ -27,15 +28,10 @@ import * as ethplorerAPI from './ethplorer-api'
 import {
   ApproveParams,
   CallParams,
-  EstimateApproveParams,
-  EstimateCallParams,
-  EthNetwork,
-  ExplorerUrl,
   FeesWithGasPricesAndLimits,
   GasOracleResponse,
   GasPrices,
   InfuraCreds,
-  IsApprovedParams,
   TxOverrides,
 } from './types'
 import {
@@ -44,6 +40,7 @@ import {
   ETH_DECIMAL,
   MAX_APPROVAL,
   SIMPLE_GAS_COST,
+  getDefaultFees,
   getDefaultGasPrices,
   getFee,
   getTokenAddress,
@@ -53,146 +50,80 @@ import {
   validateAddress,
   xchainNetworkToEths,
 } from './utils'
+import { Wallet } from './wallet'
 
-/**
- * Interface for custom Ethereum client
- */
-export interface EthereumClient {
-  call<T>(params: CallParams): Promise<T>
-  estimateCall(asset: EstimateCallParams): Promise<BigNumber>
-  estimateGasPrices(): Promise<GasPrices>
-  estimateGasLimit(params: TxParams): Promise<BigNumber>
-  estimateFeesWithGasPricesAndLimits(params: TxParams): Promise<FeesWithGasPricesAndLimits>
-  estimateApprove(params: EstimateApproveParams): Promise<BigNumber>
-  isApproved(params: IsApprovedParams): Promise<boolean>
-  approve(params: ApproveParams): Promise<TransactionResponse>
-  // `getFees` of `BaseXChainClient` needs to be overridden
-  getFees(params: TxParams): Promise<Fees>
-}
-
-export type EthereumClientParams = XChainClientParams & {
-  ethplorerUrl?: string
-  ethplorerApiKey?: string
-  explorerUrl?: ExplorerUrl
+export interface ClientParams extends BaseClientParams {
+  ethplorerUrl: string
+  ethplorerApiKey: string
   etherscanApiKey?: string
   infuraCreds?: InfuraCreds
+  thornodeUrl?: string
 }
 
-/**
- * Custom Ethereum client
- */
-export default class Client extends BaseXChainClient implements XChainClient, EthereumClient {
-  private ethNetwork: EthNetwork
-  private hdNode!: HDNode
-  private etherscanApiKey?: string
-  private explorerUrl: ExplorerUrl
-  private infuraCreds: InfuraCreds | undefined
-  private ethplorerUrl: string
-  private ethplorerApiKey: string
-  private providers: Map<Network, Provider> = new Map<Network, Provider>()
-
-  /**
-   * Constructor
-   * @param {EthereumClientParams} params
-   */
-  constructor({
-    network = Network.Testnet,
-    ethplorerUrl = 'https://api.ethplorer.io',
-    ethplorerApiKey = 'freekey',
-    explorerUrl,
-    phrase = '',
-    rootDerivationPaths = {
-      [Network.Mainnet]: `m/44'/60'/0'/0/`,
-      [Network.Testnet]: `m/44'/60'/0'/0/`, // this is INCORRECT but makes the unit tests pass
+export const MAINNET_PARAMS: ClientParams = {
+  chain: Chain.Ethereum,
+  network: Network.Mainnet,
+  getFullDerivationPath: (index: number) => `44'/60'/0'/0/${index}`,
+  extraPrefixes: ['0x'],
+  explorer: {
+    url: 'https://etherscan.io',
+    getAddressUrl(address: string) {
+      return `${this.url}/address/${address}`
     },
-    etherscanApiKey,
-    infuraCreds,
-  }: EthereumClientParams) {
-    super(Chain.Ethereum, { network, rootDerivationPaths })
-    this.ethNetwork = xchainNetworkToEths(network)
-    this.rootDerivationPaths = rootDerivationPaths
-    this.infuraCreds = infuraCreds
-    this.etherscanApiKey = etherscanApiKey
-    this.ethplorerUrl = ethplorerUrl
-    this.ethplorerApiKey = ethplorerApiKey
-    this.explorerUrl = explorerUrl || this.getDefaultExplorerURL()
-    this.setupProviders()
-    this.setPhrase(phrase)
-  }
+    getTxUrl(txid: string) {
+      return `${this.url}/tx/${txid}`
+    },
+  },
+  ethplorerUrl: 'https://api.ethplorer.io',
+  ethplorerApiKey: 'freekey',
+  thornodeUrl: 'https://thornode.thorchain.info',
+}
 
-  /**
-   * Purge client.
-   *
-   * @returns {void}
-   */
-  purgeClient(): void {
-    super.purgeClient()
-    this.hdNode = HDNode.fromMnemonic('')
-  }
+export const TESTNET_PARAMS: ClientParams = {
+  ...MAINNET_PARAMS,
+  network: Network.Testnet,
+  getFullDerivationPath: (index: number) => `44'/60'/0'/0/${index}`, // this is INCORRECT but makes the unit tests pass
+  explorer: {
+    ...MAINNET_PARAMS.explorer,
+    url: 'https://ropsten.etherscan.io',
+  },
+  thornodeUrl: 'https://testnet.thornode.thorchain.info',
+}
 
-  /**
-   * Set/Update the explorer url.
-   *
-   * @param {string} url The explorer url.
-   * @returns {void}
-   */
-  setExplorerURL(url: ExplorerUrl): void {
-    this.explorerUrl = url
-  }
+export class Client extends BaseClient<ClientParams, Wallet> implements MultiAssetClient {
+  readonly provider: Provider
 
-  /**
-   * Get the current address.
-   *
-   * @param {number} walletIndex (optional) HD wallet index
-   * @returns {Address} The current address.
-   *
-   * @throws {"Phrase must be provided"}
-   * Thrown if phrase has not been set before. A phrase is needed to create a wallet and to derive an address from it.
-   */
-  getAddress(walletIndex = 0): Address {
-    if (walletIndex < 0) {
-      throw new Error('index must be greater than zero')
-    }
-    return this.hdNode.derivePath(this.getFullDerivationPath(walletIndex)).address.toLowerCase()
-  }
-
-  /**
-   * Get etherjs wallet interface.
-   *
-   * @param {number} walletIndex (optional) HD wallet index
-   * @returns {Wallet} The current etherjs wallet interface.
-   *
-   * @throws {"Phrase must be provided"}
-   * Thrown if phrase has not been set before. A phrase is needed to create a wallet and to derive an address from it.
-   */
-  getWallet(walletIndex = 0): ethers.Wallet {
-    return new Wallet(this.hdNode.derivePath(this.getFullDerivationPath(walletIndex))).connect(this.getProvider())
-  }
-  setupProviders(): void {
-    if (this.infuraCreds) {
-      // Infura provider takes either a string of project id
-      // or an object of id and secret
-      const testnetProvider = this.infuraCreds.projectSecret
-        ? new ethers.providers.InfuraProvider(EthNetwork.Test, this.infuraCreds)
-        : new ethers.providers.InfuraProvider(EthNetwork.Test, this.infuraCreds.projectId)
-      const mainnetProvider = this.infuraCreds.projectSecret
-        ? new ethers.providers.InfuraProvider(EthNetwork.Main, this.infuraCreds)
-        : new ethers.providers.InfuraProvider(EthNetwork.Main, this.infuraCreds.projectId)
-      this.providers.set(Network.Testnet, testnetProvider)
-      this.providers.set(Network.Mainnet, mainnetProvider)
+  protected constructor(params: ClientParams) {
+    super(params)
+    const infuraCreds = this.params.infuraCreds
+    if (infuraCreds !== undefined) {
+      this.provider = new ethers.providers.InfuraProvider(
+        xchainNetworkToEths(this.params.network),
+        infuraCreds.projectSecret ? infuraCreds : infuraCreds.projectId,
+      )
     } else {
-      this.providers.set(Network.Testnet, getDefaultProvider(EthNetwork.Test))
-      this.providers.set(Network.Mainnet, getDefaultProvider(EthNetwork.Main))
+      this.provider = getDefaultProvider(xchainNetworkToEths(this.params.network))
     }
   }
 
+  static readonly create = Client.bindFactory((x: ClientParams) => new Client(x))
+
   /**
-   * Get etherjs Provider interface.
-   *
-   * @returns {Provider} The current etherjs Provider interface.
+   * @deprecated
    */
   getProvider(): Provider {
-    return this.providers.get(this.network) || getDefaultProvider(this.network)
+    return this.provider
+  }
+
+  async getSigner(index = 0): Promise<ethers.Signer> {
+    if (this.wallet === null) throw new Error('client must be unlocked')
+    const signer = await this.wallet.getSigner(index, this.provider)
+    return signer
+  }
+
+  protected async getVoidSigner(index: number): Promise<ethers.VoidSigner> {
+    if (this.wallet === null) throw new Error('client must be unlocked')
+    return new ethers.VoidSigner(await this.getAddress(index), this.provider)
   }
 
   /**
@@ -200,118 +131,23 @@ export default class Client extends BaseXChainClient implements XChainClient, Et
    *
    * @returns {EtherscanProvider} The current etherjs EtherscanProvider interface.
    */
-  getEtherscanProvider(): EtherscanProvider {
-    return new EtherscanProvider(this.ethNetwork, this.etherscanApiKey)
+  protected async getEtherscanProvider(): Promise<EtherscanProvider> {
+    return new EtherscanProvider(this.params.network, this.params.etherscanApiKey)
   }
 
-  /**
-   * Get the explorer url.
-   *
-   * @returns {string} The explorer url for ethereum based on the current network.
-   */
-  getExplorerUrl(): string {
-    return this.getExplorerUrlByNetwork(this.getNetwork())
+  async validateAddress(address: Address): Promise<boolean> {
+    return super.validateAddress(address) && validateAddress(address)
   }
 
-  /**
-   * Get the explorer url.
-   *
-   * @returns {ExplorerUrl} The explorer url (both mainnet and testnet) for ethereum.
-   */
-  private getDefaultExplorerURL(): ExplorerUrl {
-    return {
-      [Network.Testnet]: 'https://ropsten.etherscan.io',
-      [Network.Mainnet]: 'https://etherscan.io',
-    }
-  }
-
-  /**
-   * Get the explorer url.
-   *
-   * @param {Network} network
-   * @returns {string} The explorer url for ethereum based on the network.
-   */
-  private getExplorerUrlByNetwork(network: Network): string {
-    return this.explorerUrl[network]
-  }
-
-  /**
-   * Get the explorer url for the given address.
-   *
-   * @param {Address} address
-   * @returns {string} The explorer url for the given address.
-   */
-  getExplorerAddressUrl(address: Address): string {
-    return `${this.getExplorerUrl()}/address/${address}`
-  }
-
-  /**
-   * Get the explorer url for the given transaction id.
-   *
-   * @param {string} txID
-   * @returns {string} The explorer url for the given transaction id.
-   */
-  getExplorerTxUrl(txID: string): string {
-    return `${this.getExplorerUrl()}/tx/${txID}`
-  }
-
-  /**
-   * Set/update the current network.
-   *
-   * @param {Network} network
-   * @returns {void}
-   *
-   * @throws {"Network must be provided"}
-   * Thrown if network has not been set before.
-   */
-  setNetwork(network: Network): void {
-    super.setNetwork(network)
-    this.ethNetwork = xchainNetworkToEths(network)
-  }
-
-  /**
-   * Set/update a new phrase (Eg. If user wants to change wallet)
-   *
-   * @param {string} phrase A new phrase.
-   * @param {number} walletIndex (optional) HD wallet index
-   * @returns {Address} The address from the given phrase
-   *
-   * @throws {"Invalid phrase"}
-   * Thrown if the given phase is invalid.
-   */
-  setPhrase(phrase: string, walletIndex = 0): Address {
-    this.hdNode = HDNode.fromMnemonic(phrase)
-    return super.setPhrase(phrase, walletIndex)
-  }
-
-  /**
-   * Validate the given address.
-   *
-   * @param {Address} address
-   * @returns {boolean} `true` or `false`
-   */
-  validateAddress(address: Address): boolean {
-    return validateAddress(address)
-  }
-
-  /**
-   * Get the ETH balance of a given address.
-   *
-   * @param {Address} address By default, it will return the balance of the current wallet. (optional)
-   * @returns {Balance[]} The all balance of the address.
-   *
-   * @throws {"Invalid asset"} throws when the give asset is an invalid one
-   */
   async getBalance(address: Address, assets?: Asset[]): Promise<Balance[]> {
-    const ethAddress = address || this.getAddress()
     // get ETH balance directly from provider
-    const ethBalance: BigNumber = await this.getProvider().getBalance(ethAddress)
+    const ethBalance: BigNumber = await this.getProvider().getBalance(address)
     const ethBalanceAmount = baseAmount(ethBalance.toString(), ETH_DECIMAL)
 
-    switch (this.getNetwork()) {
+    switch (this.params.network) {
       case Network.Mainnet: {
         // use ethplorerAPI for mainnet - ignore assets
-        const account = await ethplorerAPI.getAddress(this.ethplorerUrl, address, this.ethplorerApiKey)
+        const account = await ethplorerAPI.getAddress(this.params.ethplorerUrl, address, this.params.ethplorerApiKey)
         const balances: Balance[] = [
           {
             asset: AssetETH,
@@ -336,7 +172,7 @@ export default class Client extends BaseXChainClient implements XChainClient, Et
         const balances = []
         for (let i = 0; i < newAssets.length; i++) {
           const asset = newAssets[i]
-          const etherscan = this.getEtherscanProvider()
+          const etherscan = await this.getEtherscanProvider()
           if (assetToString(asset) !== assetToString(AssetETH)) {
             // Handle token balances
             const assetAddress = getTokenAddress(asset)
@@ -351,7 +187,11 @@ export default class Client extends BaseXChainClient implements XChainClient, Et
             })
             const decimals =
               BigNumber.from(
-                await this.call<BigNumberish>({ contractAddress: assetAddress, abi: erc20ABI, funcName: 'decimals' }),
+                await this.callOffline<BigNumberish>({
+                  contractAddress: assetAddress,
+                  abi: erc20ABI,
+                  funcName: 'decimals',
+                }),
               ).toNumber() || ETH_DECIMAL
 
             if (!Number.isNaN(decimals)) {
@@ -384,18 +224,18 @@ export default class Client extends BaseXChainClient implements XChainClient, Et
    * @param {TxHistoryParams} params The options to get transaction history. (optional)
    * @returns {TxsPage} The transaction history.
    */
-  async getTransactions(params?: TxHistoryParams): Promise<TxsPage> {
+  async getTransactions(params: TxHistoryParams): Promise<TxsPage> {
     const offset = params?.offset || 0
     const limit = params?.limit || 10
     const assetAddress = params?.asset
 
     const maxCount = 10000
 
-    let transations
-    const etherscan = this.getEtherscanProvider()
+    let transactions
+    const etherscan = await this.getEtherscanProvider()
 
     if (assetAddress) {
-      transations = await etherscanAPI.getTokenTransactionHistory({
+      transactions = await etherscanAPI.getTokenTransactionHistory({
         baseUrl: etherscan.baseUrl,
         address: params?.address,
         assetAddress,
@@ -404,7 +244,7 @@ export default class Client extends BaseXChainClient implements XChainClient, Et
         apiKey: etherscan.apiKey,
       })
     } else {
-      transations = await etherscanAPI.getETHTransactionHistory({
+      transactions = await etherscanAPI.getETHTransactionHistory({
         baseUrl: etherscan.baseUrl,
         address: params?.address,
         page: 0,
@@ -414,8 +254,8 @@ export default class Client extends BaseXChainClient implements XChainClient, Et
     }
 
     return {
-      total: transations.length,
-      txs: transations.filter((_, index) => index >= offset && index < offset + limit),
+      total: transactions.length,
+      txs: transactions.filter((_, index) => index >= offset && index < offset + limit),
     }
   }
 
@@ -430,10 +270,10 @@ export default class Client extends BaseXChainClient implements XChainClient, Et
    * Thrown if the given txId is invalid.
    */
   async getTransactionData(txId: string, assetAddress?: Address): Promise<Tx> {
-    switch (this.getNetwork()) {
+    switch (this.params.network) {
       case Network.Mainnet: {
         // use ethplorerAPI for mainnet - ignore assetAddress
-        const txInfo = await ethplorerAPI.getTxInfo(this.ethplorerUrl, txId, this.ethplorerApiKey)
+        const txInfo = await ethplorerAPI.getTxInfo(this.params.ethplorerUrl, txId, this.params.ethplorerApiKey)
         if (!txInfo.operations?.length) return getTxFromEthplorerEthTransaction(txInfo)
         const tx = getTxFromEthplorerTokenOperation(txInfo.operations[0])
         if (!tx) throw new Error('Could not parse transaction data')
@@ -441,7 +281,7 @@ export default class Client extends BaseXChainClient implements XChainClient, Et
       }
       case Network.Testnet: {
         let tx
-        const etherscan = this.getEtherscanProvider()
+        const etherscan = await this.getEtherscanProvider()
         const txInfo = await etherscan.getTransaction(txId)
         if (txInfo) {
           if (assetAddress) {
@@ -470,54 +310,33 @@ export default class Client extends BaseXChainClient implements XChainClient, Et
         }
 
         if (!tx) throw new Error('Could not get transaction history')
-
         return tx
       }
     }
   }
 
-  /**
-   * Call a contract function.
-   * @template T The result interface.
-   * @param {number} walletIndex (optional) HD wallet index
-   * @param {Address} contractAddress The contract address.
-   * @param {ContractInterface} abi The contract ABI json.
-   * @param {string} funcName The function to be called.
-   * @param {any[]} funcParams The parameters of the function.
-   * @returns {T} The result of the contract function call.
-   *
-   * @throws {"contractAddress must be provided"}
-   * Thrown if the given contract address is empty.
-   */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async call<T>({ walletIndex = 0, contractAddress, abi, funcName, funcParams = [] }: CallParams): Promise<T> {
-    if (!contractAddress) throw new Error('contractAddress must be provided')
-    const contract = new ethers.Contract(contractAddress, abi, this.getProvider()).connect(this.getWallet(walletIndex))
-    return contract[funcName](...funcParams)
+    const signer = await this.getSigner(walletIndex)
+    const contract = new ethers.Contract(contractAddress, abi, this.provider).connect(signer)
+    return contract[funcName](...(funcParams ?? []))
   }
 
-  /**
-   * Call a contract function.
-   * @param {Address} contractAddress The contract address.
-   * @param {ContractInterface} abi The contract ABI json.
-   * @param {string} funcName The function to be called.
-   * @param {any[]} funcParams The parameters of the function.
-   * @param {number} walletIndex (optional) HD wallet index
-   * @returns {BigNumber} The result of the contract function call.
-   *
-   * @throws {"contractAddress must be provided"}
-   * Thrown if the given contract address is empty.
-   */
+  async callOffline<T>({ walletIndex = 0, contractAddress, abi, funcName, funcParams = [] }: CallParams): Promise<T> {
+    const signer = await this.getVoidSigner(walletIndex ?? 0)
+    const contract = new ethers.Contract(contractAddress, abi, this.provider).connect(signer)
+    return contract[funcName](...(funcParams ?? []))
+  }
+
   async estimateCall({
+    walletIndex = 0,
     contractAddress,
     abi,
     funcName,
     funcParams = [],
-    walletIndex = 0,
-  }: EstimateCallParams): Promise<BigNumber> {
-    if (!contractAddress) throw new Error('contractAddress must be provided')
-    const contract = new ethers.Contract(contractAddress, abi, this.getProvider()).connect(this.getWallet(walletIndex))
-    return contract.estimateGas[funcName](...funcParams)
+  }: CallParams): Promise<BigNumber> {
+    const signer = await this.getVoidSigner(walletIndex ?? 0)
+    const contract = new ethers.Contract(contractAddress, abi, this.provider).connect(signer)
+    return contract.estimateGas[funcName](...(funcParams ?? []))
   }
 
   /**
@@ -525,19 +344,18 @@ export default class Client extends BaseXChainClient implements XChainClient, Et
    *
    * @param {Address} contractAddress The spender address.
    * @param {Address} spenderAddress The spender address.
-   * @param {BaseAmount} amount The amount to check if it's allowed to spend or not (optional).
+   * @param {BaseAmount} amount The amount to check if it's allowed to spend or not.
    * @param {number} walletIndex (optional) HD wallet index
    * @returns {boolean} `true` or `false`.
    */
-  async isApproved({ contractAddress, spenderAddress, amount, walletIndex = 0 }: IsApprovedParams): Promise<boolean> {
-    // since amount is optional, set it to smallest amount by default
-    const txAmount = BigNumber.from(amount?.amount().toFixed() ?? 1)
-    const owner = this.getAddress(walletIndex)
-    const allowance = await this.call<BigNumberish>({
+  async isApproved({ walletIndex, contractAddress, spenderAddress, amount }: ApproveParams): Promise<boolean> {
+    const txAmount = BigNumber.from(amount.amount().toFixed())
+    const allowance = await this.callOffline<BigNumberish>({
+      walletIndex,
       contractAddress,
       abi: erc20ABI,
       funcName: 'allowance',
-      funcParams: [owner, spenderAddress],
+      funcParams: [spenderAddress, spenderAddress],
     })
     return txAmount.lte(allowance)
   }
@@ -554,37 +372,37 @@ export default class Client extends BaseXChainClient implements XChainClient, Et
    * @returns {TransactionResponse} The transaction result.
    */
   async approve({
+    walletIndex = 0,
     contractAddress,
     spenderAddress,
     feeOptionKey: feeOption = FeeOption.Fastest,
     amount,
-    walletIndex = 0,
-    gasLimitFallback,
-  }: ApproveParams): Promise<TransactionResponse> {
-    const gasPrice = BigNumber.from(
-      (
-        await this.estimateGasPrices()
-          .then((prices) => prices[feeOption])
-          .catch(() => getDefaultGasPrices()[feeOption])
+  }: ApproveParams & { feeOptionKey?: FeeOption }): Promise<TransactionResponse> {
+    const gasPrice =
+      feeOption &&
+      BigNumber.from(
+        (
+          await this.estimateGasPrices()
+            .then((prices) => prices[feeOption])
+            .catch(() => getDefaultGasPrices()[feeOption])
+        )
+          .amount()
+          .toFixed(),
       )
-        .amount()
-        .toFixed(),
+    const gasLimit = await this.estimateApprove({ walletIndex, spenderAddress, contractAddress, amount }).catch(
+      () => undefined,
     )
-    const gasLimit = await this.estimateApprove({
-      walletIndex,
-      spenderAddress,
-      contractAddress,
-      amount,
-    }).catch(() => BigNumber.from(gasLimitFallback))
 
     const txAmount = amount ? BigNumber.from(amount.amount().toFixed()) : MAX_APPROVAL
-    return await this.call<TransactionResponse>({
+    const txResult = await this.call<TransactionResponse>({
       walletIndex,
       contractAddress,
       abi: erc20ABI,
       funcName: 'approve',
-      funcParams: [spenderAddress, txAmount, { from: this.getAddress(walletIndex), gasPrice, gasLimit }],
+      funcParams: [spenderAddress, txAmount, { from: await this.getAddress(walletIndex), gasPrice, gasLimit }],
     })
+
+    return txResult
   }
 
   /**
@@ -597,49 +415,35 @@ export default class Client extends BaseXChainClient implements XChainClient, Et
    * @returns {BigNumber} The estimated gas limit.
    */
   async estimateApprove({
+    walletIndex = 0,
     contractAddress,
     spenderAddress,
-    walletIndex = 0,
     amount,
-  }: EstimateApproveParams): Promise<BigNumber> {
+  }: ApproveParams): Promise<BigNumber> {
     const txAmount = amount ? BigNumber.from(amount.amount().toFixed()) : MAX_APPROVAL
     const gasLimit = await this.estimateCall({
       walletIndex,
       contractAddress,
       abi: erc20ABI,
       funcName: 'approve',
-      funcParams: [spenderAddress, txAmount, { from: this.getAddress(walletIndex) }],
+      funcParams: [spenderAddress, txAmount, { from: await this.getAddress(walletIndex) }],
     })
 
     return gasLimit
   }
 
-  /**
-   * Transfer ETH.
-   *
-   * @param {TxParams} params The transfer options.
-   * @param {feeOptionKey} FeeOption Fee option (optional)
-   * @param {gasPrice} BaseAmount Gas price (optional)
-   * @param {gasLimit} BigNumber Gas limit (optional)
-   *
-   * A given `feeOptionKey` wins over `gasPrice` and `gasLimit`
-   *
-   * @returns {TxHash} The transaction hash.
-   */
-  async transfer({
-    walletIndex = 0,
-    asset,
-    memo,
-    amount,
-    recipient,
-    feeOptionKey: feeOption,
-    gasPrice,
-    gasLimit,
-  }: TxParams & {
-    feeOptionKey?: FeeOption
-    gasPrice?: BaseAmount
-    gasLimit?: BigNumber
-  }): Promise<TxHash> {
+  async transfer(
+    params: TxParams & { gasLimit?: BigNumber } & (
+        | { feeOptionKey?: FeeOption; gasPrice?: never }
+        | { feeOptionKey?: never; gasPrice?: BaseAmount }
+      ),
+  ): Promise<TxHash> {
+    if (this.wallet === null) throw new Error('client must be unlocked')
+    const index = params.walletIndex ?? 0
+    if (!(Number.isSafeInteger(index) && index >= 0)) throw new Error('index must be a non-negative integer')
+
+    const { asset, memo, amount, recipient, feeOptionKey: feeOption, gasPrice, gasLimit } = params
+
     const txAmount = BigNumber.from(amount.amount().toFixed())
 
     let assetAddress
@@ -654,18 +458,21 @@ export default class Client extends BaseXChainClient implements XChainClient, Et
     const defaultGasLimit: ethers.BigNumber = isETHAddress ? SIMPLE_GAS_COST : BASE_TOKEN_GAS_COST
 
     let overrides: TxOverrides = {
-      gasLimit: gasLimit || defaultGasLimit,
+      gasLimit: gasLimit ?? defaultGasLimit,
       gasPrice: gasPrice && BigNumber.from(gasPrice.amount().toFixed()),
     }
 
     // override `overrides` if `feeOption` is provided
     if (feeOption) {
-      const gasPrice = await this.estimateGasPrices()
-        .then((prices) => prices[feeOption])
-        .catch(() => getDefaultGasPrices()[feeOption])
-      const gasLimit = await this.estimateGasLimit({ asset, recipient, amount, memo }).catch(() => defaultGasLimit)
+      const gasPrices = await this.estimateGasPrices().catch(() => getDefaultGasPrices())
+      const gasPrice = gasPrices[feeOption]
+      const gasLimit = await this.estimateGasLimit({
+        ...params,
+        walletIndex: index,
+      }).catch(() => defaultGasLimit)
 
       overrides = {
+        ...overrides,
         gasLimit,
         gasPrice: BigNumber.from(gasPrice.amount().toFixed()),
       }
@@ -675,7 +482,7 @@ export default class Client extends BaseXChainClient implements XChainClient, Et
     if (assetAddress && !isETHAddress) {
       // Transfer ERC20
       txResult = await this.call<TransactionResponse>({
-        walletIndex,
+        walletIndex: index,
         contractAddress: assetAddress,
         abi: erc20ABI,
         funcName: 'transfer',
@@ -683,56 +490,49 @@ export default class Client extends BaseXChainClient implements XChainClient, Et
       })
     } else {
       // Transfer ETH
-      const transactionRequest = Object.assign(
-        { to: recipient, value: txAmount },
+      const transactionRequest: ethers.providers.TransactionRequest = Object.assign(
+        {
+          nonce: await this.provider.getTransactionCount(await this.getAddress(index)),
+          chainId: (await this.provider.getNetwork()).chainId,
+          to: recipient,
+          value: txAmount,
+        },
         {
           ...overrides,
           data: memo ? toUtf8Bytes(memo) : undefined,
         },
       )
 
-      txResult = await this.getWallet().sendTransaction(transactionRequest)
+      const signer = await this.wallet.getSigner(index)
+      const signedTx = await signer.signTransaction(transactionRequest)
+      txResult = await this.provider.sendTransaction(signedTx)
     }
 
     return txResult.hash
   }
 
-  /**
-   * Estimate gas price.
-   * @see https://etherscan.io/apis#gastracker
-   *
-   * @returns {GasPrices} The gas prices (average, fast, fastest) in `Wei` (`BaseAmount`)
-   */
   async estimateGasPrices(): Promise<GasPrices> {
-    try {
-      // Note: `rates` are in `gwei`
-      // @see https://gitlab.com/thorchain/thornode/-/blob/develop/x/thorchain/querier.go#L416-420
-      // To have all values in `BaseAmount`, they needs to be converted into `wei` (1 gwei = 1,000,000,000 wei = 1e9)
-      const ratesInGwei = standardFeeRates(await this.getFeeRateFromThorchain())
-      return {
-        [FeeOption.Average]: baseAmount(ratesInGwei[FeeOption.Average] * 10 ** 9, ETH_DECIMAL),
-        [FeeOption.Fast]: baseAmount(ratesInGwei[FeeOption.Fast] * 10 ** 9, ETH_DECIMAL),
-        [FeeOption.Fastest]: baseAmount(ratesInGwei[FeeOption.Fastest] * 10 ** 9, ETH_DECIMAL),
+    if (this.params.thornodeUrl !== undefined) {
+      try {
+        // Note: `rates` are in `gwei`
+        // @see https://gitlab.com/thorchain/thornode/-/blob/develop/x/thorchain/querier.go#L416-420
+        // To have all values in `BaseAmount`, they needs to be converted into `wei` (1 gwei = 1,000,000,000 wei = 1e9)
+        const ratesInGwei = standardFeeRates(await getFeeRateFromThorchain(this.params.thornodeUrl, Chain.Ethereum))
+        return {
+          [FeeOption.Average]: baseAmount(ratesInGwei[FeeOption.Average] * 10 ** 9, ETH_DECIMAL),
+          [FeeOption.Fast]: baseAmount(ratesInGwei[FeeOption.Fast] * 10 ** 9, ETH_DECIMAL),
+          [FeeOption.Fastest]: baseAmount(ratesInGwei[FeeOption.Fastest] * 10 ** 9, ETH_DECIMAL),
+        }
+      } catch (error) {
+        console.warn(`Rate lookup via Thorchain failed: ${error}`)
       }
-    } catch (error) {}
-    //should only get here if thor fails
-    try {
-      return await this.estimateGasPricesFromEtherscan()
-    } catch (error) {
-      return Promise.reject(new Error(`Failed to estimate gas price: ${error.msg ?? error.toString()}`))
     }
+    // should only get here if thor fails
+    return await this.estimateGasPricesFromEtherscan()
   }
 
-  /**
-   * Estimate gas price.
-   * @see https://etherscan.io/apis#gastracker
-   *
-   * @returns {GasPrices} The gas prices (average, fast, fastest) in `Wei` (`BaseAmount`)
-   *
-   * @throws {"Failed to estimate gas price"} Thrown if failed to estimate gas price.
-   */
   async estimateGasPricesFromEtherscan(): Promise<GasPrices> {
-    const etherscan = this.getEtherscanProvider()
+    const etherscan = await this.getEtherscanProvider()
     const response: GasOracleResponse = await etherscanAPI.getGasOracle(etherscan.baseUrl, etherscan.apiKey)
 
     // Convert result of gas prices: `Gwei` -> `Wei`
@@ -753,36 +553,30 @@ export default class Client extends BaseXChainClient implements XChainClient, Et
    * @param {TxParams} params The transaction and fees options.
    * @returns {BaseAmount} The estimated gas fee.
    */
-  async estimateGasLimit({ asset, recipient, amount, memo }: TxParams): Promise<BigNumber> {
+  async estimateGasLimit({ walletIndex: index = 0, asset, recipient, amount, memo }: TxParams): Promise<BigNumber> {
+    const fromAddress = await this.getAddress(index)
     const txAmount = BigNumber.from(amount.amount().toFixed())
 
-    let assetAddress
-    if (asset && assetToString(asset) !== assetToString(AssetETH)) {
-      assetAddress = getTokenAddress(asset)
-    }
+    const assetAddress = asset && assetToString(asset) !== assetToString(AssetETH) ? getTokenAddress(asset) : null
 
-    let estimate
-
-    if (assetAddress && assetAddress !== ETHAddress) {
+    if (assetAddress !== null && assetAddress !== ETHAddress) {
       // ERC20 gas estimate
-      const contract = new ethers.Contract(assetAddress, erc20ABI, this.getProvider())
+      const contract = new ethers.Contract(assetAddress, erc20ABI, this.provider)
 
-      estimate = await contract.estimateGas.transfer(recipient, txAmount, {
-        from: this.getAddress(),
+      return await contract.estimateGas.transfer(recipient, txAmount, {
+        from: fromAddress,
       })
     } else {
       // ETH gas estimate
       const transactionRequest = {
-        from: this.getAddress(),
+        from: fromAddress,
         to: recipient,
         value: txAmount,
         data: memo ? toUtf8Bytes(memo) : undefined,
       }
 
-      estimate = await this.getProvider().estimateGas(transactionRequest)
+      return await this.provider.estimateGas(transactionRequest)
     }
-
-    return estimate
   }
 
   /**
@@ -792,46 +586,22 @@ export default class Client extends BaseXChainClient implements XChainClient, Et
    * @returns {FeesWithGasPricesAndLimits} The estimated gas prices/limits.
    */
   async estimateFeesWithGasPricesAndLimits(params: TxParams): Promise<FeesWithGasPricesAndLimits> {
-    // gas prices
     const gasPrices = await this.estimateGasPrices()
-    const { fast: fastGP, fastest: fastestGP, average: averageGP } = gasPrices
-
-    // gas limits
-    const gasLimit = await this.estimateGasLimit({
-      asset: params.asset,
-      amount: params.amount,
-      recipient: params.recipient,
-      memo: params.memo,
-    })
+    const gasLimit = await this.estimateGasLimit(params)
 
     return {
       gasPrices,
-      fees: {
-        type: FeeType.PerByte,
-        average: getFee({ gasPrice: averageGP, gasLimit }),
-        fast: getFee({ gasPrice: fastGP, gasLimit }),
-        fastest: getFee({ gasPrice: fastestGP, gasLimit }),
-      },
+      fees: await calcFeesAsync(
+        gasPrices,
+        (gasPrice: BaseAmount, gasLimit: BigNumber) => getFee({ gasPrice, gasLimit }),
+        gasLimit,
+      ),
       gasLimit,
     }
   }
 
-  /**
-   * Get fees.
-   *
-   * @param {TxParams} params
-   * @returns {Fees} The average/fast/fastest fees.
-   *
-   * @throws {"Failed to get fees"} Thrown if failed to get fees.
-   */
-  getFees(): never
-  getFees(params: TxParams): Promise<Fees>
   async getFees(params?: TxParams): Promise<Fees> {
-    if (!params) throw new Error('Params need to be passed')
-
-    const { fees } = await this.estimateFeesWithGasPricesAndLimits(params)
-    return fees
+    if (params === undefined) return getDefaultFees()
+    return (await this.estimateFeesWithGasPricesAndLimits(params)).fees
   }
 }
-
-export { Client }

@@ -97,28 +97,26 @@ export const getUnspentTxs = async ({
   address,
   startingFromTxId,
 }: AddressParams): Promise<BtcAddressUTXO[]> => {
-  let resp = null
-  if (startingFromTxId) {
-    resp = await axios.get(`${sochainUrl}/get_tx_unspent/${toSochainNetwork(network)}/${address}/${startingFromTxId}`)
-  } else {
-    resp = await axios.get(`${sochainUrl}/get_tx_unspent/${toSochainNetwork(network)}/${address}`)
-  }
-  const response: SochainResponse<BtcUnspentTxsDTO> = resp.data
+  const response: SochainResponse<BtcUnspentTxsDTO> = (
+    await axios.get(
+      `${sochainUrl}/get_tx_unspent/${toSochainNetwork(network)}/${address}${
+        startingFromTxId ? `/${startingFromTxId}` : ''
+      }`,
+    )
+  ).data
   const txs = response.data.txs
-  if (txs.length === 100) {
-    //fetch the next batch
-    const lastTxId = txs[99].txid
+  if (txs.length !== 100) return txs
 
-    const nextBatch = await getUnspentTxs({
-      sochainUrl,
-      network,
-      address,
-      startingFromTxId: lastTxId,
-    })
-    return txs.concat(nextBatch)
-  } else {
-    return txs
-  }
+  //fetch the next batch
+  const lastTxId = txs[99].txid
+
+  const nextBatch = await getUnspentTxs({
+    sochainUrl,
+    network,
+    address,
+    startingFromTxId: lastTxId,
+  })
+  return txs.concat(nextBatch)
 }
 
 /**
@@ -132,10 +130,10 @@ export const getUnspentTxs = async ({
  * @returns {TxConfirmedStatus}
  */
 export const getIsTxConfirmed = async ({ sochainUrl, network, hash }: TxHashParams): Promise<TxConfirmedStatus> => {
-  const { data } = await axios.get<SochainResponse<TxConfirmedStatus>>(
-    `${sochainUrl}/is_tx_confirmed/${toSochainNetwork(network)}/${hash}`,
-  )
-  return data.data
+  const response: SochainResponse<TxConfirmedStatus> = (
+    await axios.get(`${sochainUrl}/is_tx_confirmed/${toSochainNetwork(network)}/${hash}`)
+  ).data
+  return response.data
 }
 
 /**

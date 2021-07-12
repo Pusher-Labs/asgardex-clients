@@ -1,12 +1,13 @@
-import { Network, TxsPage } from '@xchainjs/xchain-client'
+import { TxsPage } from '@xchainjs/xchain-client'
 import { BaseAmount, baseAmount } from '@xchainjs/xchain-util'
 import { BaseAccount, BroadcastTxCommitResult, Coin } from 'cosmos-client/api'
 import nock from 'nock'
 
-import { Client } from '../src/client'
+import { Client, MAINNET_PARAMS, TESTNET_PARAMS } from '../src/client'
 import { TxHistoryResponse, TxResponse } from '../src/cosmos/types'
 import { AssetMuon } from '../src/types'
 import { getDenom } from '../src/util'
+import { Wallet } from '../src/wallet'
 
 const getClientUrl = (client: Client): string => {
   return client.getNetwork() === 'testnet' ? 'http://lcd.gaia.bigdipper.live:1317' : 'https://api.cosmos.network'
@@ -73,56 +74,38 @@ describe('Client Test', () => {
   const address0_testnet = 'cosmos13hrqe0g38nqnjgnstkfrlm2zd790g5yegntshv'
   const address1_testnet = 'cosmos1re8rf3sv2tkx88xx6825tjqtfntrrfj0h4u94u'
 
-  beforeEach(() => {
-    cosmosClient = new Client({ phrase, network: 'testnet' as Network })
-  })
-
-  afterEach(() => {
-    cosmosClient.purgeClient()
+  beforeEach(async () => {
+    cosmosClient = await Client.create(TESTNET_PARAMS, Wallet.create(phrase))
   })
 
   it('should start with empty wallet', async () => {
-    const cosmosClientEmptyMain = new Client({ phrase, network: 'mainnet' as Network })
-    expect(cosmosClientEmptyMain.getAddress()).toEqual(address0_mainnet)
-    expect(cosmosClientEmptyMain.getAddress(1)).toEqual(address1_mainnet)
+    const cosmosClientEmptyMain = await Client.create(MAINNET_PARAMS, Wallet.create(phrase))
+    expect(await cosmosClientEmptyMain.getAddress()).toEqual(address0_mainnet)
+    expect(await cosmosClientEmptyMain.getAddress(1)).toEqual(address1_mainnet)
 
-    const cosmosClientEmptyTest = new Client({ phrase, network: 'testnet' as Network })
-    expect(cosmosClientEmptyTest.getAddress()).toEqual(address0_testnet)
-    expect(cosmosClientEmptyTest.getAddress(1)).toEqual(address1_testnet)
+    const cosmosClientEmptyTest = await Client.create(TESTNET_PARAMS, Wallet.create(phrase))
+    expect(await cosmosClientEmptyTest.getAddress()).toEqual(address0_testnet)
+    expect(await cosmosClientEmptyTest.getAddress(1)).toEqual(address1_testnet)
   })
 
   it('throws an error passing an invalid phrase', async () => {
-    expect(() => {
-      new Client({ phrase: 'invalid phrase', network: 'mainnet' as Network })
-    }).toThrow()
-
-    expect(() => {
-      new Client({ phrase: 'invalid phrase', network: 'testnet' as Network })
-    }).toThrow()
+    await expect(Client.create(MAINNET_PARAMS, Wallet.create('invalid phrase'))).rejects.toThrow()
+    await expect(Client.create(TESTNET_PARAMS, Wallet.create('invalid phrase'))).rejects.toThrow()
   })
 
   it('should have right address', async () => {
-    expect(cosmosClient.getAddress()).toEqual(address0_testnet)
-  })
-
-  it('should update net', async () => {
-    const client = new Client({ phrase, network: 'mainnet' as Network })
-    client.setNetwork('testnet' as Network)
-    expect(client.getNetwork()).toEqual('testnet')
-
-    const address = client.getAddress()
-    expect(address).toEqual(address)
+    expect(await cosmosClient.getAddress()).toEqual(address0_testnet)
   })
 
   it('should init, should have right prefix', async () => {
-    expect(cosmosClient.validateAddress(cosmosClient.getAddress())).toEqual(true)
+    expect(await cosmosClient.validateAddress(await cosmosClient.getAddress())).toEqual(true)
 
-    cosmosClient.setNetwork('mainnet' as Network)
-    expect(cosmosClient.validateAddress(cosmosClient.getAddress())).toEqual(true)
+    cosmosClient = await Client.create(MAINNET_PARAMS, Wallet.create(phrase))
+    expect(await cosmosClient.validateAddress(await cosmosClient.getAddress())).toEqual(true)
   })
 
   it('has no balances', async () => {
-    cosmosClient.setNetwork('mainnet' as Network)
+    cosmosClient = await Client.create(MAINNET_PARAMS, Wallet.create(phrase))
 
     mockAccountsBalance(getClientUrl(cosmosClient), address0_mainnet, {
       height: 0,
@@ -150,7 +133,7 @@ describe('Client Test', () => {
   })
 
   it('has an empty tx history', async () => {
-    cosmosClient.setNetwork('mainnet' as Network)
+    cosmosClient = await Client.create(MAINNET_PARAMS, Wallet.create(phrase))
 
     const expected: TxsPage = {
       total: 0,
@@ -211,7 +194,7 @@ describe('Client Test', () => {
     let transactions = await cosmosClient.getTransactions({ address: 'cosmos1xvt4e7xd0j9dwv2w83g50tpcltsl90h52003e2' })
     expect(transactions.total).toBeGreaterThan(0)
 
-    cosmosClient.setNetwork('mainnet' as Network)
+    cosmosClient = await Client.create(MAINNET_PARAMS, Wallet.create(phrase))
 
     assertTxHstory(getClientUrl(cosmosClient), 'cosmos1pjkpqxmvz47a5aw40l98fyktlg7k6hd9heq95z', {
       count: 1,
@@ -267,7 +250,7 @@ describe('Client Test', () => {
       height: 0,
     }
 
-    mockAccountsAddress(getClientUrl(cosmosClient), cosmosClient.getAddress(), {
+    mockAccountsAddress(getClientUrl(cosmosClient), await cosmosClient.getAddress(), {
       height: 0,
       result: {
         coins: [
@@ -282,7 +265,7 @@ describe('Client Test', () => {
     })
     assertTxsPost(
       getClientUrl(cosmosClient),
-      cosmosClient.getAddress(),
+      await cosmosClient.getAddress(),
       to_address,
       [
         {
@@ -295,6 +278,7 @@ describe('Client Test', () => {
     )
 
     const result = await cosmosClient.transfer({
+      walletIndex: 0,
       asset: AssetMuon,
       recipient: to_address,
       amount: send_amount,
@@ -305,7 +289,7 @@ describe('Client Test', () => {
   })
 
   it('get transaction data', async () => {
-    cosmosClient.setNetwork('mainnet' as Network)
+    cosmosClient = await Client.create(MAINNET_PARAMS, Wallet.create(phrase))
 
     assertTxHashGet(getClientUrl(cosmosClient), '19BFC1E8EBB10AA1EC6B82E380C6F5FD349D367737EA8D55ADB4A24F0F7D1066', {
       height: 1047,
@@ -345,31 +329,31 @@ describe('Client Test', () => {
     expect(tx.to[0].amount.amount().isEqualTo(baseAmount(4318994970, 6).amount())).toBeTruthy()
   })
 
-  it('should return valid explorer url', () => {
+  it('should return valid explorer url', async () => {
     // Client created with network === 'testnet'
     expect(cosmosClient.getExplorerUrl()).toEqual('https://gaia.bigdipper.live')
 
-    cosmosClient.setNetwork('mainnet' as Network)
+    cosmosClient = await Client.create(MAINNET_PARAMS, Wallet.create(phrase))
     expect(cosmosClient.getExplorerUrl()).toEqual('https://cosmos.bigdipper.live')
   })
 
-  it('should retrun valid explorer address url', () => {
+  it('should retrun valid explorer address url', async () => {
     expect(cosmosClient.getExplorerAddressUrl('anotherTestAddressHere')).toEqual(
       'https://gaia.bigdipper.live/account/anotherTestAddressHere',
     )
 
-    cosmosClient.setNetwork('mainnet' as Network)
+    cosmosClient = await Client.create(MAINNET_PARAMS, Wallet.create(phrase))
     expect(cosmosClient.getExplorerAddressUrl('testAddressHere')).toEqual(
       'https://cosmos.bigdipper.live/account/testAddressHere',
     )
   })
 
-  it('should retrun valid explorer tx url', () => {
+  it('should retrun valid explorer tx url', async () => {
     expect(cosmosClient.getExplorerTxUrl('anotherTestTxHere')).toEqual(
       'https://gaia.bigdipper.live/transactions/anotherTestTxHere',
     )
 
-    cosmosClient.setNetwork('mainnet' as Network)
+    cosmosClient = await Client.create(MAINNET_PARAMS, Wallet.create(phrase))
     expect(cosmosClient.getExplorerTxUrl('testTxHere')).toEqual('https://cosmos.bigdipper.live/transactions/testTxHere')
   })
 })

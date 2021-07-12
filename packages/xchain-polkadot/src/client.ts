@@ -1,225 +1,77 @@
 import { ApiPromise, Keyring, WsProvider } from '@polkadot/api'
-import { KeyringPair } from '@polkadot/keyring/types'
 import { hexToU8a, isHex } from '@polkadot/util'
 import {
   Address,
   Balance,
+  Client as BaseClient,
+  ClientParams as BaseClientParams,
   FeeType,
   Fees,
   Network,
-  RootDerivationPaths,
   Tx,
   TxHash,
   TxHistoryParams,
   TxParams,
   TxType,
   TxsPage,
-  XChainClient,
-  XChainClientParams,
   singleFee,
 } from '@xchainjs/xchain-client'
-import * as xchainCrypto from '@xchainjs/xchain-crypto'
-import { Asset, assetAmount, assetToBase, assetToString, baseAmount } from '@xchainjs/xchain-util'
+import { Asset, Chain, assetAmount, assetToBase, assetToString, baseAmount } from '@xchainjs/xchain-util'
 import axios from 'axios'
 
 import { Account, AssetDOT, Extrinsic, SubscanResponse, Transfer, TransfersResult } from './types'
 import { getDecimal, isSuccess } from './util'
+import { Wallet } from './wallet'
 
-/**
- * Interface for custom Polkadot client
- */
-export interface PolkadotClient {
-  getSS58Format(): number
-  getWsEndpoint(): string
-  estimateFees(params: TxParams): Promise<Fees>
+export interface ClientParams extends BaseClientParams {
+  clientUrl: string
+  wsEndpoint: string
+  ss58Format: number
 }
 
-/**
- * Custom Polkadot client
- */
-class Client implements PolkadotClient, XChainClient {
-  private network: Network
-  private phrase = ''
-  private rootDerivationPaths: RootDerivationPaths
-
-  /**
-   * Constructor
-   * Client is initialised with network type and phrase (optional)
-   *
-   * @param {XChainClientParams} params
-   */
-  constructor({
-    network = Network.Testnet,
-    phrase,
-    rootDerivationPaths = {
-      [Network.Mainnet]: "44//354//0//0//0'", //TODO IS the root path we want to use?
-      [Network.Testnet]: "44//354//0//0//0'",
+export const MAINNET_PARAMS: ClientParams = {
+  chain: Chain.Polkadot,
+  network: Network.Mainnet,
+  getFullDerivationPath: (index: number) => `44//354//0//0//0'${index === 0 ? '' : `//${index}`}`, //TODO IS the root path we want to use?
+  extraPrefixes: ['1'],
+  explorer: {
+    url: 'https://polkadot.subscan.io',
+    getAddressUrl(address: string) {
+      return `${this.url}/account/${address}`
     },
-  }: XChainClientParams) {
-    this.network = network
-    this.rootDerivationPaths = rootDerivationPaths
+    getTxUrl(txid: string) {
+      return `${this.url}/extrinsic/${txid}`
+    },
+  },
+  clientUrl: 'https://polkadot.subscan.io',
+  wsEndpoint: 'wss://rpc.polkadot.io',
+  ss58Format: 0,
+}
 
-    if (phrase) this.setPhrase(phrase)
-  }
-  /**
-   * Get getFullDerivationPath
-   *
-   * @param {number} index the HD wallet index
-   * @returns {string} The polkadot derivation path based on the network.
-   */
-  getFullDerivationPath(index = 0): string {
-    // console.log(this.rootDerivationPaths[this.network])
-    if (index === 0) {
-      // this should make the tests backwards compatible
-      return this.rootDerivationPaths[this.network]
-    } else {
-      return this.rootDerivationPaths[this.network] + `//${index}`
-    }
-  }
+export const TESTNET_PARAMS: ClientParams = {
+  ...MAINNET_PARAMS,
+  network: Network.Testnet,
+  extraPrefixes: ['5'],
+  explorer: {
+    ...MAINNET_PARAMS.explorer,
+    url: 'https://westend.subscan.io',
+  },
+  clientUrl: 'https://westend.subscan.io',
+  wsEndpoint: 'wss://westend-rpc.polkadot.io',
+  ss58Format: 42,
+}
 
-  /**
-   * Purge client.
-   *
-   * @returns {void}
-   */
-  purgeClient(): void {
-    this.phrase = ''
-  }
+export class Client extends BaseClient<ClientParams, Wallet> {
+  static readonly create = Client.bindFactory((x: ClientParams) => new Client(x))
 
-  /**
-   * Set/update the current network.
-   *
-   * @param {Network} network
-   *
-   * @throws {"Network must be provided"}
-   * Thrown if network has not been set before.
-   */
-  setNetwork(network: Network): void {
-    if (!network) {
-      throw new Error('Network must be provided')
-    } else {
-      if (network !== this.network) {
-        this.network = network
-      }
-    }
-  }
-
-  /**
-   * Get the current network.
-   *
-   * @returns {Network}
-   */
-  getNetwork(): Network {
-    return this.network
-  }
-
-  /**
-   * Get the client url.
-   *
-   * @returns {string} The client url based on the network.
-   */
   getClientUrl(): string {
-    switch (this.network) {
-      case Network.Mainnet:
-        return 'https://polkadot.subscan.io'
-      case Network.Testnet:
-        return 'https://westend.subscan.io'
-    }
+    return this.params.clientUrl
   }
-
-  /**
-   * Get the client WebSocket url.
-   *
-   * @returns {string} The client WebSocket url based on the network.
-   */
   getWsEndpoint(): string {
-    switch (this.network) {
-      case Network.Mainnet:
-        return 'wss://rpc.polkadot.io'
-      case Network.Testnet:
-        return 'wss://westend-rpc.polkadot.io'
-    }
+    return this.params.wsEndpoint
   }
-
-  /**
-   * Get the explorer url.
-   *
-   * @returns {string} The explorer url based on the network.
-   */
-  getExplorerUrl(): string {
-    switch (this.network) {
-      case Network.Mainnet:
-        return 'https://polkadot.subscan.io'
-      case Network.Testnet:
-        return 'https://westend.subscan.io'
-    }
-  }
-
-  /**
-   * Get the explorer url for the given address.
-   *
-   * @param {Address} address
-   * @returns {string} The explorer url for the given address based on the network.
-   */
-  getExplorerAddressUrl(address: Address): string {
-    return `${this.getExplorerUrl()}/account/${address}`
-  }
-
-  /**
-   * Get the explorer url for the given transaction id.
-   *
-   * @param {string} txID The transaction id
-   * @returns {string} The explorer url for the given transaction id based on the network.
-   */
-  getExplorerTxUrl(txID: string): string {
-    return `${this.getExplorerUrl()}/extrinsic/${txID}`
-  }
-
-  /**
-   * Get the SS58 format to be used for Polkadot Keyring.
-   *
-   * @returns {number} The SS58 format based on the network.
-   */
   getSS58Format(): number {
-    switch (this.network) {
-      case Network.Mainnet:
-        return 0
-      case Network.Testnet:
-        return 42
-    }
-  }
-
-  /**
-   * Set/update a new phrase.
-   *
-   * @param {string} phrase A new phrase.
-   * @returns {Address} The address from the given phrase
-   *
-   * @throws {"Invalid phrase"}
-   * Thrown if the given phase is invalid.
-   */
-  setPhrase(phrase: string, walletIndex = 0): Address {
-    if (this.phrase !== phrase) {
-      if (!xchainCrypto.validatePhrase(phrase)) {
-        throw new Error('Invalid phrase')
-      }
-      this.phrase = phrase
-    }
-
-    return this.getAddress(walletIndex)
-  }
-
-  /**
-   * @private
-   * Private function to get Keyring pair for polkadotjs provider.
-   * @see https://polkadot.js.org/docs/api/start/keyring/#creating-a-keyring-instance
-   *
-   * @returns {KeyringPair} The keyring pair to be used to generate wallet address.
-   * */
-  private getKeyringPair(index: number): KeyringPair {
-    const key = new Keyring({ ss58Format: this.getSS58Format(), type: 'ed25519' })
-
-    return key.createFromUri(`${this.phrase}//${this.getFullDerivationPath(index)}`)
+    return this.params.ss58Format
   }
 
   /**
@@ -233,48 +85,20 @@ class Client implements PolkadotClient, XChainClient {
   private async getAPI(): Promise<ApiPromise> {
     const api = new ApiPromise({ provider: new WsProvider(this.getWsEndpoint()) })
     await api.isReady
-
     if (!api.isConnected) await api.connect()
-
     return api
   }
 
-  /**
-   * Validate the given address.
-   * @see https://polkadot.js.org/docs/util-crypto/examples/validate-address
-   *
-   * @param {Address} address
-   * @returns {boolean} `true` or `false`
-   */
-  validateAddress(address: string): boolean {
+  async validateAddress(address: string): Promise<boolean> {
+    if (!super.validateAddress(address)) return false
     try {
-      const key = new Keyring({ ss58Format: this.getSS58Format(), type: 'ed25519' })
+      const key = new Keyring({ ss58Format: this.params.ss58Format, type: 'ed25519' })
       return key.encodeAddress(isHex(address) ? hexToU8a(address) : key.decodeAddress(address)) === address
     } catch (error) {
       return false
     }
   }
 
-  /**
-   * Get the current address.
-   *
-   * Generates a network-specific key-pair by first converting the buffer to a Wallet-Import-Format (WIF)
-   * The address is then decoded into type P2WPKH and returned.
-   *
-   * @returns {Address} The current address.
-   *
-   * @throws {"Address not defined"} Thrown if failed creating account from phrase.
-   */
-  getAddress(index = 0): Address {
-    return this.getKeyringPair(index).address
-  }
-
-  /**
-   * Get the DOT balance of a given address.
-   *
-   * @param {Address} address By default, it will return the balance of the current wallet. (optional)
-   * @returns {Balance[]} The DOT balance of the address.
-   */
   async getBalance(address: Address, assets?: Asset[]): Promise<Balance[]> {
     const response: SubscanResponse<Account> = (
       await axios.post(`${this.getClientUrl()}/api/open/account`, { address: address || this.getAddress() })
@@ -288,22 +112,15 @@ class Client implements PolkadotClient, XChainClient {
       ? [
           {
             asset: AssetDOT,
-            amount: assetToBase(assetAmount(account.balance, getDecimal(this.network))),
+            amount: assetToBase(assetAmount(account.balance, getDecimal(this.params.network))),
           },
         ]
       : []
   }
 
-  /**
-   * Get transaction history of a given address with pagination options.
-   * By default it will return the transaction history of the current wallet.
-   *
-   * @param {TxHistoryParams} params The options to get transaction history. (optional)
-   * @returns {TxsPage} The transaction history.
-   */
-  async getTransactions(params?: TxHistoryParams): Promise<TxsPage> {
-    const limit = params?.limit ?? 10
-    const offset = params?.offset ?? 0
+  async getTransactions(params: TxHistoryParams): Promise<TxsPage> {
+    const limit = params.limit ?? 10
+    const offset = params.offset ?? 0
 
     const response: SubscanResponse<TransfersResult> = (
       await axios.post(`${this.getClientUrl()}/api/scan/transfers`, {
@@ -323,13 +140,13 @@ class Client implements PolkadotClient, XChainClient {
         from: [
           {
             from: transfer.from,
-            amount: assetToBase(assetAmount(transfer.amount, getDecimal(this.network))),
+            amount: assetToBase(assetAmount(transfer.amount, getDecimal(this.params.network))),
           },
         ],
         to: [
           {
             to: transfer.to,
-            amount: assetToBase(assetAmount(transfer.amount, getDecimal(this.network))),
+            amount: assetToBase(assetAmount(transfer.amount, getDecimal(this.params.network))),
           },
         ],
         date: new Date(transfer.block_timestamp * 1000),
@@ -339,12 +156,6 @@ class Client implements PolkadotClient, XChainClient {
     }
   }
 
-  /**
-   * Get the transaction details of a given transaction id.
-   *
-   * @param {string} txId The transaction id.
-   * @returns {Tx} The transaction details of the given transaction id.
-   */
   async getTransactionData(txId: string): Promise<Tx> {
     const response: SubscanResponse<Extrinsic> = (
       await axios.post(`${this.getClientUrl()}/api/scan/extrinsic`, { hash: txId })
@@ -359,13 +170,13 @@ class Client implements PolkadotClient, XChainClient {
       from: [
         {
           from: transfer.from,
-          amount: assetToBase(assetAmount(transfer.amount, getDecimal(this.network))),
+          amount: assetToBase(assetAmount(transfer.amount, getDecimal(this.params.network))),
         },
       ],
       to: [
         {
           to: transfer.to,
-          amount: assetToBase(assetAmount(transfer.amount, getDecimal(this.network))),
+          amount: assetToBase(assetAmount(transfer.amount, getDecimal(this.params.network))),
         },
       ],
       date: new Date(extrinsic.block_timestamp * 1000),
@@ -374,16 +185,16 @@ class Client implements PolkadotClient, XChainClient {
     }
   }
 
-  /**
-   * Transfer DOT.
-   *
-   * @param {TxParams} params The transfer options.
-   * @returns {TxHash} The transaction hash.
-   */
   async transfer(params: TxParams): Promise<TxHash> {
+    if (this.wallet === null) throw new Error('client must be unlocked')
+    const index = params.walletIndex ?? 0
+    if (!(Number.isSafeInteger(index) && index >= 0)) throw new Error('index must be a non-negative integer')
+
+    const keyringPair = await this.wallet.getKeyringPair(index)
+    const address = await this.getAddress(index)
+
     const api = await this.getAPI()
     let transaction = null
-    const walletIndex = params.walletIndex || 0
     // Createing a transfer
     const transfer = api.tx.balances.transfer(params.recipient, params.amount.amount().toString())
     if (!params.memo) {
@@ -400,52 +211,41 @@ class Client implements PolkadotClient, XChainClient {
     }
 
     // Check balances
-    const paymentInfo = await transaction.paymentInfo(this.getKeyringPair(walletIndex))
-    const fee = baseAmount(paymentInfo.partialFee.toString(), getDecimal(this.network))
-    const balances = await this.getBalance(this.getAddress(walletIndex), [AssetDOT])
+    const paymentInfo = await transaction.paymentInfo(address)
+    const fee = baseAmount(paymentInfo.partialFee.toString(), getDecimal(this.params.network))
+    const balances = await this.getBalance(address, [AssetDOT])
 
     if (!balances || params.amount.amount().plus(fee.amount()).isGreaterThan(balances[0].amount.amount())) {
       throw new Error('insufficient balance')
     }
 
-    const txHash = await transaction.signAndSend(this.getKeyringPair(walletIndex))
+    const txHash = await transaction.signAndSend(keyringPair)
     await api.disconnect()
 
     return txHash.toString()
   }
 
-  /**
-   * Get the current fee with transfer options.
-   *
-   * @see https://polkadot.js.org/docs/api/cookbook/tx/#how-do-i-estimate-the-transaction-fees
-   *
-   * @param {TxParams} params The transfer options.
-   * @returns {Fees} The estimated fees with the transfer options.
-   */
   async estimateFees(params: TxParams): Promise<Fees> {
-    const walletIndex = params.walletIndex ? params.walletIndex : 0
+    if (this.wallet === null) throw new Error('client must be unlocked')
+    const index = params.walletIndex ?? 0
+    if (!(Number.isSafeInteger(index) && index >= 0)) throw new Error('index must be a non-negative integer')
+
     const api = await this.getAPI()
     const info = await api.tx.balances
       .transfer(params.recipient, params.amount.amount().toNumber())
-      .paymentInfo(this.getKeyringPair(walletIndex))
+      .paymentInfo(await this.getAddress(index))
 
-    const fee = baseAmount(info.partialFee.toString(), getDecimal(this.network))
+    const fee = baseAmount(info.partialFee.toString(), getDecimal(this.params.network))
     await api.disconnect()
 
     return singleFee(FeeType.PerByte, fee)
   }
 
-  /**
-   * Get the current fee.
-   *
-   * @returns {Fees} The current fee.
-   */
-  async getFees(): Promise<Fees> {
+  async getFees(index?: number): Promise<Fees> {
     return await this.estimateFees({
-      recipient: this.getAddress(),
-      amount: baseAmount(0, getDecimal(this.network)),
+      walletIndex: index,
+      recipient: await this.getAddress(index),
+      amount: baseAmount(0, getDecimal(this.params.network)),
     })
   }
 }
-
-export { Client }

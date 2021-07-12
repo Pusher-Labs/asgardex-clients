@@ -1,11 +1,11 @@
 import { Global } from '@polkadot/rpc-provider/mock/types'
 import { Constructor } from '@polkadot/types/types'
-import { Network } from '@xchainjs/xchain-client'
 import { baseAmount } from '@xchainjs/xchain-util'
 
 import { assertAccountsBalance, assertTxData, assertTxHistory } from '../__mocks__/subscan'
 import { Scope, mockWs } from '../__mocks__/ws'
-import { Client } from '../src/client'
+import { Client, MAINNET_PARAMS, TESTNET_PARAMS } from '../src/client'
+import { Wallet } from '../src/wallet'
 
 declare const global: Global
 
@@ -18,39 +18,34 @@ describe('Client Test', () => {
   const mainnet_address = '15gn1stGWNFPrErAUmEfKEaG6eSpGqdAZg8E7yRKSNdozbZn'
   const testnet_address = '5GkUsYdCeayvQhqeX8BfB5k7F2TAaY52VBPjxgRxtHcHp2sd'
 
-  beforeEach(() => {
-    polkadotClient = new Client({ phrase, network: 'testnet' as Network })
+  beforeEach(async () => {
+    polkadotClient = await Client.create(TESTNET_PARAMS, Wallet.create(phrase))
 
     globalWs = global.WebSocket
     mock = mockWs(polkadotClient.getWsEndpoint())
   })
 
-  afterEach(() => {
-    polkadotClient.purgeClient()
+  afterEach(async () => {
+    await polkadotClient.purgeClient()
 
     global.WebSocket = globalWs
     mock.done()
   })
 
   it('throws an error passing an invalid phrase', async () => {
-    expect(() => {
-      new Client({ phrase: 'invalid phrase', network: 'mainnet' as Network })
-    }).toThrow()
-
-    expect(() => {
-      new Client({ phrase: 'invalid phrase', network: 'testnet' as Network })
-    }).toThrow()
+    await expect(Client.create(MAINNET_PARAMS, Wallet.create('invalid phrase'))).rejects.toThrow()
+    await expect(Client.create(TESTNET_PARAMS, Wallet.create('invalid phrase'))).rejects.toThrow()
   })
 
   it('should have right address', async () => {
-    expect(polkadotClient.getAddress()).toEqual(testnet_address)
+    expect(await polkadotClient.getAddress()).toEqual(testnet_address)
 
-    polkadotClient.setNetwork('mainnet' as Network)
-    expect(polkadotClient.getAddress()).toEqual(mainnet_address)
+    polkadotClient = await Client.create(MAINNET_PARAMS, Wallet.create(phrase))
+    expect(await polkadotClient.getAddress()).toEqual(mainnet_address)
   })
 
   it('should update net', async () => {
-    polkadotClient.setNetwork('mainnet' as Network)
+    polkadotClient = await Client.create(MAINNET_PARAMS, Wallet.create(phrase))
     expect(polkadotClient.getNetwork()).toEqual('mainnet')
 
     const address = await polkadotClient.getAddress()
@@ -58,17 +53,17 @@ describe('Client Test', () => {
   })
 
   it('should validate address', async () => {
-    polkadotClient.setNetwork('mainnet' as Network)
-    expect(polkadotClient.validateAddress(testnet_address)).toEqual(false)
-    expect(polkadotClient.validateAddress(mainnet_address)).toEqual(true)
+    polkadotClient = await Client.create(MAINNET_PARAMS, Wallet.create(phrase))
+    expect(await polkadotClient.validateAddress(testnet_address)).toEqual(false)
+    expect(await polkadotClient.validateAddress(mainnet_address)).toEqual(true)
 
-    polkadotClient.setNetwork('testnet' as Network)
-    expect(polkadotClient.validateAddress(mainnet_address)).toEqual(false)
-    expect(polkadotClient.validateAddress(testnet_address)).toEqual(true)
+    polkadotClient = await Client.create(TESTNET_PARAMS, Wallet.create(phrase))
+    expect(await polkadotClient.validateAddress(mainnet_address)).toEqual(false)
+    expect(await polkadotClient.validateAddress(testnet_address)).toEqual(true)
   })
 
   it('no balances', async () => {
-    polkadotClient.setNetwork('mainnet' as Network)
+    polkadotClient = await Client.create(MAINNET_PARAMS, Wallet.create(phrase))
 
     assertAccountsBalance(polkadotClient.getClientUrl(), mainnet_address, {
       code: 0,
@@ -77,7 +72,7 @@ describe('Client Test', () => {
       data: null,
     })
 
-    const balances = await polkadotClient.getBalance(polkadotClient.getAddress())
+    const balances = await polkadotClient.getBalance(await polkadotClient.getAddress())
     expect(balances.length).toEqual(0)
   })
 
@@ -93,13 +88,13 @@ describe('Client Test', () => {
       },
     })
 
-    const balances = await polkadotClient.getBalance(polkadotClient.getAddress())
+    const balances = await polkadotClient.getBalance(await polkadotClient.getAddress())
     expect(balances.length).toEqual(1)
     expect(balances[0].amount.amount().isEqualTo(baseAmount('500000000000', 12).amount())).toBeTruthy()
   })
 
   it('no txHistory', async () => {
-    polkadotClient.setNetwork('mainnet' as Network)
+    polkadotClient = await Client.create(MAINNET_PARAMS, Wallet.create(phrase))
 
     assertTxHistory(polkadotClient.getClientUrl(), mainnet_address, {
       code: 0,
@@ -111,7 +106,7 @@ describe('Client Test', () => {
       },
     })
 
-    const txHistory = await polkadotClient.getTransactions({ address: polkadotClient.getAddress() })
+    const txHistory = await polkadotClient.getTransactions({ address: await polkadotClient.getAddress() })
     expect(txHistory.total).toEqual(0)
     expect(txHistory.txs.length).toEqual(0)
   })

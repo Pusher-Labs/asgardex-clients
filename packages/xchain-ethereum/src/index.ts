@@ -5,9 +5,9 @@ export {
   getDecimal,
   getDefaultFees,
   getTokenAddress,
-  getPrefix,
   getFee,
   validateAddress,
   ETHAddress,
   ETH_DECIMAL,
 } from './utils'
+export * from './wallet'

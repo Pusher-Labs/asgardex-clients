@@ -1,10 +1,10 @@
-import { Address, FeeType, Fees, Network, TxHash, TxType, singleFee } from '@xchainjs/xchain-client'
+import { Address, FeeType, Fees, TxType, singleFee } from '@xchainjs/xchain-client'
 import { TxLog } from '@xchainjs/xchain-cosmos'
 import { Asset, BaseAmount, Chain, assetFromString, assetToString, baseAmount } from '@xchainjs/xchain-util'
 import { AccAddress, Msg, codec } from 'cosmos-client'
 import { MsgMultiSend, MsgSend } from 'cosmos-client/x/bank'
 
-import { AssetRune, ClientUrl, ExplorerUrl, ExplorerUrls, TxData } from './types'
+import { AssetRune, TxData } from './types'
 
 export const DECIMAL = 8
 export const DEFAULT_GAS_VALUE = '2000000'
@@ -75,22 +75,6 @@ export const isBroadcastSuccess = (response: unknown): boolean =>
   (response as Record<string, unknown>).logs !== undefined
 
 /**
- * Get address prefix based on the network.
- *
- * @param {Network} network
- * @returns {string} The address prefix based on the network.
- *
- **/
-export const getPrefix = (network: Network) => {
-  switch (network) {
-    case Network.Mainnet:
-      return 'thor'
-    case Network.Testnet:
-      return 'tthor'
-  }
-}
-
-/**
  * Register Codecs based on the prefix.
  *
  * @param {string} prefix
@@ -119,9 +103,7 @@ export const registerCodecs = (prefix: string): void => {
 export const getDepositTxDataFromLogs = (logs: TxLog[], address: Address): TxData => {
   const events = logs[0]?.events
 
-  if (!events) {
-    throw Error('No events in logs available')
-  }
+  if (!events) throw new Error('No events in logs available')
 
   type TransferData = { sender: string; recipient: string; amount: BaseAmount }
   type TransferDataList = TransferData[]
@@ -174,113 +156,4 @@ export const getDefaultFees = (): Fees => {
  */
 export const getTxType = (txData: string, encoding: 'base64' | 'hex'): string => {
   return Buffer.from(txData, encoding).toString().slice(4)
-}
-
-/**
- * Get the client url.
- *
- * @returns {ClientUrl} The client url (both mainnet and testnet) for thorchain.
- */
-export const getDefaultClientUrl = (): ClientUrl => {
-  return {
-    [Network.Testnet]: {
-      node: 'https://testnet.thornode.thorchain.info',
-      rpc: 'https://testnet.rpc.thorchain.info',
-    },
-    [Network.Mainnet]: {
-      node: 'https://thornode.thorchain.info',
-      rpc: 'https://rpc.thorchain.info',
-    },
-  }
-}
-
-const DEFAULT_EXPLORER_URL = 'https://viewblock.io/thorchain'
-
-/**
- * Get default explorer urls.
- *
- * @returns {ExplorerUrls} Default explorer urls (both mainnet and testnet) for thorchain.
- */
-export const getDefaultExplorerUrls = (): ExplorerUrls => {
-  const root: ExplorerUrl = {
-    [Network.Testnet]: `${DEFAULT_EXPLORER_URL}?network=testnet`,
-    [Network.Mainnet]: DEFAULT_EXPLORER_URL,
-  }
-  const txUrl = `${DEFAULT_EXPLORER_URL}/tx`
-  const tx: ExplorerUrl = {
-    [Network.Testnet]: txUrl,
-    [Network.Mainnet]: txUrl,
-  }
-  const addressUrl = `${DEFAULT_EXPLORER_URL}/address`
-  const address: ExplorerUrl = {
-    [Network.Testnet]: addressUrl,
-    [Network.Mainnet]: addressUrl,
-  }
-
-  return {
-    root,
-    tx,
-    address,
-  }
-}
-
-/**
- * Get the explorer url.
- *
- * @param {Network} network
- * @param {ExplorerUrls} Explorer urls
- * @returns {string} The explorer url for thorchain based on the given network.
- */
-export const getExplorerUrl = ({ root }: ExplorerUrls, network: Network): string => root[network]
-
-/**
- * Get explorer address url.
- *
- * @param {ExplorerUrls} Explorer urls
- * @param {Network} network
- * @param {Address} address
- * @returns {string} The explorer url for the given address.
- */
-export const getExplorerAddressUrl = ({
-  urls,
-  network,
-  address,
-}: {
-  urls: ExplorerUrls
-  network: Network
-  address: Address
-}): string => {
-  const url = `${urls.address[network]}/${address}`
-  switch (network) {
-    case Network.Mainnet:
-      return url
-    case Network.Testnet:
-      return `${url}?network=testnet`
-  }
-}
-
-/**
- * Get transaction url.
- *
- * @param {ExplorerUrls} Explorer urls
- * @param {Network} network
- * @param {TxHash} txID
- * @returns {string} The explorer url for the given transaction id.
- */
-export const getExplorerTxUrl = ({
-  urls,
-  network,
-  txID,
-}: {
-  urls: ExplorerUrls
-  network: Network
-  txID: TxHash
-}): string => {
-  const url = `${urls.tx[network]}/${txID}`
-  switch (network) {
-    case Network.Mainnet:
-      return url
-    case Network.Testnet:
-      return `${url}?network=testnet`
-  }
 }

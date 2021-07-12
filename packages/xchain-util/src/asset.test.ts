@@ -22,8 +22,7 @@ import {
   isValidAsset,
 } from './asset'
 import { bn } from './index'
-import { Asset, Denomination } from './types'
-import { Chain } from './chain'
+import { Asset, Chain, Denomination } from './types'
 
 describe('asset', () => {
   describe('isBigNumberValue', () => {

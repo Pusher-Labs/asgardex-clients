@@ -1,4 +1,5 @@
-import { Chain, chainToString, isChain } from './chain'
+import { chainToString, isChain } from './chain'
+import { Chain } from './types'
 
 describe('chain', () => {
   it('checks type Chain', () => {

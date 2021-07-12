@@ -1,6 +1,7 @@
 import {
   Address,
   Balance,
+  ClientFactory,
   Fee,
   FeeOption,
   FeeRate,
@@ -12,211 +13,84 @@ import {
   TxType,
   TxsPage,
   UTXOClient,
-  XChainClientParams,
+  UTXOClientParams,
 } from '@xchainjs/xchain-client'
-import { getSeed } from '@xchainjs/xchain-crypto'
 import { AssetLTC, Chain, assetAmount, assetToBase } from '@xchainjs/xchain-util'
-import * as Litecoin from 'bitcoinjs-lib'
 
 import * as sochain from './sochain-api'
 import { NodeAuth } from './types'
 import { TxIO } from './types/sochain-api-types'
 import * as Utils from './utils'
+import { Wallet } from './wallet'
 
-export type LitecoinClientParams = XChainClientParams & {
-  sochainUrl?: string
-  nodeUrl?: string
-  nodeAuth?: NodeAuth | null
+export interface ClientParams extends UTXOClientParams {
+  sochainUrl: string
+  nodeUrl: string
+  nodeAuth: NodeAuth
 }
 
-/**
- * Custom Litecoin client
- */
-class Client extends UTXOClient {
-  private sochainUrl = ''
-  private nodeUrl = ''
-  private nodeAuth?: NodeAuth
-
-  /**
-   * Constructor
-   * Client is initialised with network type
-   * Pass strict null as nodeAuth to disable auth for node json rpc
-   *
-   * @param {LitecoinClientParams} params
-   */
-  constructor({
-    network = Network.Testnet,
-    sochainUrl = 'https://sochain.com/api/v2',
-    phrase,
-    nodeUrl,
-    nodeAuth = {
-      username: 'thorchain',
-      password: 'password',
+export const MAINNET_PARAMS: ClientParams = {
+  chain: Chain.Litecoin,
+  network: Network.Mainnet,
+  getFullDerivationPath: (index: number) => `84'/2'/0'/0/${index}`,
+  bech32Prefix: 'ltc',
+  extraPrefixes: ['M', '3', 'L'],
+  explorer: {
+    url: 'https://ltc.bitaps.com',
+    getAddressUrl(address: string) {
+      return `${this.url}/${address}`
     },
-    rootDerivationPaths = {
-      [Network.Mainnet]: `m/84'/2'/0'/0/`,
-      [Network.Testnet]: `m/84'/1'/0'/0/`,
+    getTxUrl(txid: string) {
+      return `${this.url}/${txid}`
     },
-  }: LitecoinClientParams) {
-    super(Chain.Litecoin, { network, rootDerivationPaths, phrase })
-    this.nodeUrl =
-      nodeUrl ??
-      (() => {
-        switch (network) {
-          case Network.Mainnet:
-            return 'https://ltc.thorchain.info'
-          case Network.Testnet:
-            return 'https://testnet.ltc.thorchain.info'
-        }
-      })()
+  },
+  sochainUrl: 'https://sochain.com/api/v2',
+  nodeUrl: 'https://ltc.thorchain.info',
+  nodeAuth: {
+    username: 'thorchain',
+    password: 'password',
+  },
+  thornodeUrl: 'https://thornode.thorchain.info',
+}
 
-    this.nodeAuth =
-      // Leave possibility to send requests without auth info for user
-      // by strictly passing nodeAuth as null value
-      nodeAuth === null ? undefined : nodeAuth
+export const TESTNET_PARAMS: ClientParams = {
+  ...MAINNET_PARAMS,
+  network: Network.Testnet,
+  getFullDerivationPath: (index: number) => `84'/1'/0'/0/${index}`,
+  bech32Prefix: 'tltc',
+  extraPrefixes: ['Q', '2', 'm', 'n'],
+  explorer: {
+    ...MAINNET_PARAMS.explorer,
+    url: 'https://tltc.bitaps.com',
+  },
+  nodeUrl: 'https://testnet.ltc.thorchain.info',
+  thornodeUrl: 'https://testnet.thornode.thorchain.info',
+}
 
-    this.setSochainUrl(sochainUrl)
+export class Client extends UTXOClient<ClientParams, Wallet> {
+  static readonly create: ClientFactory<Client> = Client.bindFactory((x: ClientParams) => new Client(x))
+
+  async validateAddress(address: string): Promise<boolean> {
+    return super.validateAddress(address) && Utils.validateAddress(address, this.params.network)
   }
 
-  /**
-   * Set/Update the sochain url.
-   *
-   * @param {string} url The new sochain url.
-   * @returns {void}
-   */
-  setSochainUrl(url: string): void {
-    this.sochainUrl = url
-  }
-
-  /**
-   * Get the explorer url.
-   *
-   * @returns {string} The explorer url based on the network.
-   */
-  getExplorerUrl(): string {
-    switch (this.network) {
-      case Network.Mainnet:
-        return 'https://ltc.bitaps.com'
-      case Network.Testnet:
-        return 'https://tltc.bitaps.com'
-    }
-  }
-
-  /**
-   * Get the explorer url for the given address.
-   *
-   * @param {Address} address
-   * @returns {string} The explorer url for the given address based on the network.
-   */
-  getExplorerAddressUrl(address: Address): string {
-    return `${this.getExplorerUrl()}/${address}`
-  }
-
-  /**
-   * Get the explorer url for the given transaction id.
-   *
-   * @param {string} txID The transaction id
-   * @returns {string} The explorer url for the given transaction id based on the network.
-   */
-  getExplorerTxUrl(txID: string): string {
-    return `${this.getExplorerUrl()}/${txID}`
-  }
-
-  /**
-   * Get the current address.
-   *
-   * Generates a network-specific key-pair by first converting the buffer to a Wallet-Import-Format (WIF)
-   * The address is then decoded into type P2WPKH and returned.
-   *
-   * @returns {Address} The current address.
-   *
-   * @throws {"Phrase must be provided"} Thrown if phrase has not been set before.
-   * @throws {"Address not defined"} Thrown if failed creating account from phrase.
-   */
-  getAddress(index = 0): Address {
-    if (index < 0) {
-      throw new Error('index must be greater than zero')
-    }
-    if (this.phrase) {
-      const ltcNetwork = Utils.ltcNetwork(this.network)
-      const ltcKeys = this.getLtcKeys(this.phrase, index)
-
-      const { address } = Litecoin.payments.p2wpkh({
-        pubkey: ltcKeys.publicKey,
-        network: ltcNetwork,
-      })
-
-      if (!address) {
-        throw new Error('Address not defined')
-      }
-      return address
-    }
-    throw new Error('Phrase must be provided')
-  }
-
-  /**
-   * @private
-   * Get private key.
-   *
-   * Private function to get keyPair from the this.phrase
-   *
-   * @param {string} phrase The phrase to be used for generating privkey
-   * @returns {ECPairInterface} The privkey generated from the given phrase
-   *
-   * @throws {"Could not get private key from phrase"} Throws an error if failed creating LTC keys from the given phrase
-   * */
-  private getLtcKeys(phrase: string, index = 0): Litecoin.ECPairInterface {
-    const ltcNetwork = Utils.ltcNetwork(this.network)
-
-    const seed = getSeed(phrase)
-    const master = Litecoin.bip32.fromSeed(seed, ltcNetwork).derivePath(this.getFullDerivationPath(index))
-
-    if (!master.privateKey) {
-      throw new Error('Could not get private key from phrase')
-    }
-
-    return Litecoin.ECPair.fromPrivateKey(master.privateKey, { network: ltcNetwork })
-  }
-
-  /**
-   * Validate the given address.
-   *
-   * @param {Address} address
-   * @returns {boolean} `true` or `false`
-   */
-  validateAddress(address: string): boolean {
-    return Utils.validateAddress(address, this.network)
-  }
-
-  /**
-   * Get the LTC balance of a given address.
-   *
-   * @param {Address} address By default, it will return the balance of the current wallet. (optional)
-   * @returns {Balance[]} The LTC balance of the address.
-   */
   async getBalance(address: Address): Promise<Balance[]> {
     return Utils.getBalance({
-      sochainUrl: this.sochainUrl,
-      network: this.network,
+      sochainUrl: this.params.sochainUrl,
+      network: this.params.network,
       address,
     })
   }
 
-  /**
-   * Get transaction history of a given address with pagination options.
-   * By default it will return the transaction history of the current wallet.
-   *
-   * @param {TxHistoryParams} params The options to get transaction history. (optional)
-   * @returns {TxsPage} The transaction history.
-   */
-  async getTransactions(params?: TxHistoryParams): Promise<TxsPage> {
+  async getTransactions(params: TxHistoryParams): Promise<TxsPage> {
     // Sochain API doesn't have pagination parameter
-    const offset = params?.offset ?? 0
-    const limit = params?.limit || 10
+    const offset = params.offset ?? 0
+    const limit = params.limit ?? 10
+
     const response = await sochain.getAddress({
-      sochainUrl: this.sochainUrl,
-      network: this.network,
-      address: `${params?.address}`,
+      sochainUrl: this.params.sochainUrl,
+      network: this.params.network,
+      address: `${params.address}`,
     })
     const total = response.txs.length
     const transactions: Tx[] = []
@@ -224,8 +98,8 @@ class Client extends UTXOClient {
     const txs = response.txs.filter((_, index) => offset <= index && index < offset + limit)
     for (const txItem of txs) {
       const rawTx = await sochain.getTx({
-        sochainUrl: this.sochainUrl,
-        network: this.network,
+        sochainUrl: this.params.sochainUrl,
+        network: this.params.network,
         hash: txItem.txid,
       })
       const tx: Tx = {
@@ -252,16 +126,10 @@ class Client extends UTXOClient {
     return result
   }
 
-  /**
-   * Get the transaction details of a given transaction id.
-   *
-   * @param {string} txId The transaction id.
-   * @returns {Tx} The transaction details of the given transaction id.
-   */
   async getTransactionData(txId: string): Promise<Tx> {
     const rawTx = await sochain.getTx({
-      sochainUrl: this.sochainUrl,
-      network: this.network,
+      sochainUrl: this.params.sochainUrl,
+      network: this.params.network,
       hash: txId,
     })
     return {
@@ -285,34 +153,29 @@ class Client extends UTXOClient {
     return Utils.calcFee(feeRate, memo)
   }
 
-  /**
-   * Transfer LTC.
-   *
-   * @param {TxParams&FeeRate} params The transfer options.
-   * @returns {TxHash} The transaction hash.
-   */
   async transfer(params: TxParams & { feeRate?: FeeRate }): Promise<TxHash> {
-    const fromAddressIndex = params?.walletIndex || 0
-    const feeRate = params.feeRate || (await this.getFeeRates())[FeeOption.Fast]
+    if (this.wallet === null) throw new Error('client must be unlocked')
+    const index = params.walletIndex ?? 0
+    if (!(Number.isSafeInteger(index) && index >= 0)) throw new Error('index must be a non-negative integer')
+
+    const ltcKeys = await this.wallet.getLtcKeys(index)
+    const feeRate = params.feeRate ?? (await this.getFeeRates())[FeeOption.Fast]
     const { psbt } = await Utils.buildTx({
       ...params,
       feeRate,
-      sender: this.getAddress(fromAddressIndex),
-      sochainUrl: this.sochainUrl,
-      network: this.network,
+      sender: await this.getAddress(index),
+      sochainUrl: this.params.sochainUrl,
+      network: this.params.network,
     })
-    const ltcKeys = this.getLtcKeys(this.phrase, fromAddressIndex)
     psbt.signAllInputs(ltcKeys) // Sign all inputs
     psbt.finalizeAllInputs() // Finalise inputs
     const txHex = psbt.extractTransaction().toHex() // TX extracted and formatted to hex
 
     return await Utils.broadcastTx({
-      network: this.network,
+      network: this.params.network,
       txHex,
-      nodeUrl: this.nodeUrl,
-      auth: this.nodeAuth,
+      nodeUrl: this.params.nodeUrl,
+      auth: this.params.nodeAuth,
     })
   }
 }
-
-export { Client }

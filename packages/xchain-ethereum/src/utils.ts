@@ -40,12 +40,6 @@ export const DEFAULT_GAS_PRICE = 50
 export const ETHAddress = '0x0000000000000000000000000000000000000000'
 export const MAX_APPROVAL = BigNumber.from(2).pow(256).sub(1)
 
-/**
- * Network -> EthNetwork
- *
- * @param {Network} network
- * @returns {EthNetwork}
- */
 export const xchainNetworkToEths = (network: Network): EthNetwork => {
   switch (network) {
     case Network.Mainnet:
@@ -55,12 +49,6 @@ export const xchainNetworkToEths = (network: Network): EthNetwork => {
   }
 }
 
-/**
- * EthNetwork -> Network
- *
- * @param {EthNetwork} network
- * @returns {Network}
- */
 export const ethNetworkToXchains = (network: EthNetwork): Network => {
   switch (network) {
     case EthNetwork.Main:
@@ -296,14 +284,6 @@ export const getDefaultGasPrices = (asset?: Asset): GasPrices => {
 }
 
 /**
- * Get address prefix based on the network.
- *
- * @returns {string} The address prefix based on the network.
- *
- **/
-export const getPrefix = () => '0x'
-
-/**
  * Filter self txs
  *
  * @returns {T[]}
@@ -349,22 +329,19 @@ export const getDecimal = async (asset: Asset, provider: providers.Provider): Pr
  *
  */
 export const getTokenBalances = (tokenBalances: TokenBalance[]): Balance[] => {
-  return tokenBalances.reduce((acc, cur) => {
-    const { symbol, address: tokenAddress } = cur.tokenInfo
-    if (validateSymbol(symbol) && validateAddress(tokenAddress) && cur?.tokenInfo?.decimals !== undefined) {
-      const decimals = parseInt(cur.tokenInfo.decimals, 10)
+  const out: Balance[] = []
+  for (const tokenBalance of tokenBalances) {
+    const { symbol, address: tokenAddress } = tokenBalance.tokenInfo
+    if (validateSymbol(symbol) && validateAddress(tokenAddress) && tokenBalance?.tokenInfo?.decimals !== undefined) {
+      const decimals = parseInt(tokenBalance.tokenInfo.decimals, 10)
       const tokenAsset = assetFromString(`${Chain.Ethereum}.${symbol}-${ethers.utils.getAddress(tokenAddress)}`)
       if (tokenAsset) {
-        return [
-          ...acc,
-          {
-            asset: tokenAsset,
-            amount: baseAmount(cur.balance, decimals),
-          },
-        ]
+        out.push({
+          asset: tokenAsset,
+          amount: baseAmount(tokenBalance.balance, decimals),
+        })
       }
     }
-
-    return acc
-  }, [] as Balance[])
+  }
+  return out
 }
